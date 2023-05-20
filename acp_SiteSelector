@@ -1,6 +1,6 @@
 #!/bin/zsh
 # https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-server-info/#api-group-server-info
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 
 typeset -A Array_sitenames
 
@@ -47,7 +47,7 @@ if [ -z $1 ]; then
 		echo ${(v)Array_sitenames[${temp_User_Response}]} > $HOME/conf/atlassian_cloud_site_name
 	fi
 	unset temp_User_Response
-	ac_lib env
+	acp_lib env
 	exit
 fi
 
