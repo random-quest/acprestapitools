@@ -1,0 +1,60 @@
+#!/bin/zsh
+# https://developer.atlassian.com/cloud/jira/software/rest/api-group-board/#api-group-board
+if [ $# -lt 1 ]; then
+  printf 'Argument missing (provided %u)\nUsage: %s command\n' "$#" "$(basename "$0")" >&2; exit 0
+fi
+CLOUD_USER=$(cat $HOME/conf/atlassian_cloud_username)
+CLOUD_TOKEN=$(cat $HOME/conf/atlassian_cloud_token)
+SITE_NAME=$(cat $HOME/conf/atlassian_site_name)
+REQ_USER=$CLOUD_USER:$CLOUD_TOKEN
+REQ_HEADER="Accept: application/json"
+REST_URL="https://${SITE_NAME}.atlassian.net/rest/agile/1.0/"
+MAX_RESULTS=50
+
+getids()
+{
+NUM_BOARDS=$(countboards)
+NUM_PAGES=$(($NUM_BOARDS/$MAX_RESULTS))
+for i in `seq 0 $NUM_PAGES`
+do
+  curl --silent --request GET --url "${REST_URL}board?startAt=$(($i*$MAX_RESULTS))&maxResults=$MAX_RESULTS" --user "$REQ_USER" --header "$REQ_HEADER" | jq -r '.values[].id'
+done
+}
+
+getnames()
+{
+NUM_BOARDS=$(countboards)
+NUM_PAGES=$(($NUM_BOARDS/$MAX_RESULTS))
+for i in `seq 0 $NUM_PAGES`
+do
+  curl --silent --request GET --url "${REST_URL}board?startAt=$(($i*$MAX_RESULTS))&maxResults=$MAX_RESULTS" --user "$REQ_USER" --header "$REQ_HEADER" | jq -r '.values[].name'
+done
+}
+
+countboards()
+{
+curl --silent --request GET --url "${REST_URL}board" --user "$REQ_USER" --header "$REQ_HEADER" | jq '.total'
+}
+
+if [ $1 = "count" ]
+then
+  countboards
+fi
+if [ $1 = "getids" ]
+then
+  getids
+fi
+if [ $1 = "getnames" ]
+then
+  getnames
+fi
+if [ $1 = "csv" ]
+then
+  NUM_BOARDS=$(countboards)
+  NUM_PAGES=$(($NUM_BOARDS/$MAX_RESULTS))
+  printf "id,name,type\n"
+  for i in `seq 0 $NUM_PAGES`
+  do
+    curl --silent --request GET --url "${REST_URL}board?startAt=$(($i*$MAX_RESULTS))&maxResults=$MAX_RESULTS" --user "$REQ_USER" --header "$REQ_HEADER" | jq -r '.values[] | [ .id, .name, .type ] | @csv'
+  done
+fi

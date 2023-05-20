@@ -1,0 +1,114 @@
+#!/bin/zsh
+# 
+source ac_lib `basename $0`
+declare -a available_keywords=("count" "jsonObjectKeys" "csv" "json" "projectUsages" "delete" "help")
+if [[ -z $1 ]]; then; user_keyword="hugo"; else; user_keyword=$1; fi
+if ! is_keyword_valid ${user_keyword} ${available_keywords[@]}; then; exit 0; fi
+integer -r G_maxResults=50
+integer G_count
+integer G_numPages
+
+function count() {
+  typeset -r json_response=`curl -s -X GET --url "${ac_url}statuses/search" -u "${ac_user}" -H "${h_a_json}" | jq`
+  G_count=`echo ${json_response} | jq '.total'`
+  G_numPages=${G_count}/${G_maxResults}
+}
+
+case $1 in
+"count")
+  count
+  printf "%u\n" ${G_count}
+  ;;
+
+"jsonObjectKeys")
+  curl -s -X GET --url "${ac_url}statuses/search" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[0] | keys_unsorted | .[]' | awk 'BEGIN {print "Root keys:"}; {print "  " $1}'
+  ;;
+
+"csv")
+  count
+  printf "id,name,statusCategory,scopeType,description\n"
+  for page in `seq 0 ${G_numPages}`; do
+    integer startIndex=${page}*${G_maxResults}
+    curl -s -X GET --url "${ac_url}statuses/search?startAt=${startIndex}&maxResults=${G_maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[] | [ (.id|tonumber), .name, .statusCategory, .scope.type, .description[0:80] ] | @csv'
+  done  
+  ;;
+
+"json")
+  count
+  for page in `seq 0 ${G_numPages}`; do
+    integer startIndex=${page}*${G_maxResults}
+    curl -s -X GET --url "${ac_url}statuses/search?expand=usages&startAt=${startIndex}&maxResults=${G_maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq '.values[]'
+    #curl -s -X GET --url "${ac_url}statuses/search?expand=usages&startAt=${startIndex}&maxResults=${G_maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[6] | ([.usages[].project.id]|join(","))'
+    #curl -s -X GET --url "${ac_url}statuses/search?expand=usages&startAt=${startIndex}&maxResults=${G_maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[6]
+  done
+  ;;
+
+"projectUsages")
+  if [ -z $2 ]; then
+    print_command_usage $1 "(items | sum)"
+    exit
+  fi
+  case ${2:l} in
+  "items")
+    printf "id,name,projectUsages\n"
+    ;;
+  "sum")
+    printf "id,name,numProjectUsages\n"
+    ;;
+  "*")
+    printf "%s should be (items | sum)\n" $2
+    exit
+    ;;
+  esac
+  reportMode=${2:l}
+  count
+  for page in `seq 0 ${G_numPages}`; do
+    integer startIndex=${page}*${G_maxResults}
+    case ${reportMode} in
+    "items")
+      curl -s -X GET --url "${ac_url}statuses/search?expand=usages&startAt=${startIndex}&maxResults=${G_maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[] | [  (.id|tonumber), .name, ( [.usages[].project.id] | join(",") )  ] | @tsv'
+      ;;
+    "sum")
+      curl -s -X GET --url "${ac_url}statuses/search?expand=usages&startAt=${startIndex}&maxResults=${G_maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[] | [  (.id|tonumber), .name, ( [.usages[].project.id] | length ) ] | @csv'
+      ;;
+    esac
+  done  
+
+  ;;
+
+"delete")
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-status/#api-rest-api-3-statuses-delete
+ typeset -r deleteLogFile="ajcStatuses_DeleteLog_${timestampDateOnly}T${timestampTimeOnly}.csv"
+  if [ -z $2 ]; then
+    print_command_usage $1 "statusId"
+    exit
+  fi
+  if [[ $2 =~ '^[0-9]+$' ]]; then
+    statusId=$2
+  else
+    print_command_usage $1 "statusId must be a number!"
+    exit
+  fi
+  printf "%u," ${statusId} | tee -a ${deleteLogFile}
+  http_response=`curl -i -s -X DELETE --url "${ac_url}statuses?id=${statusId}" --user "${ac_user}"`
+  http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
+  if [ $http_return_code -eq 204 ]; then
+    printf "deleted\n" | tee -a ${deleteLogFile}
+  fi
+  if [ $http_return_code -ge 400 ]; then
+    json_error_response=`echo $http_response | grep -E "{\"errorMessage"`
+    printf "%u-%s\n" $http_return_code ${json_error_response} | tee -a ${deleteLogFile}
+  fi
+  ;;
+
+"help")
+  printf "o) list unused statuses\n"
+  printf "\tajcStatuses json | jq -r 'select((.usages | length) == 0) | [ (.id|tonumber), .name ] | @csv'\n\n"
+  printf "o) list all statuses that are used by project 10532\n"
+  printf "\tajcStatuses json | jq '. | select(.usages[].project.id == \"10001\")'\n\n"
+  printf "o) number of project usages by status\n"
+  printf "\tajcStatuses projectUsages sum | xsv sort -N -R -s numProjectUsages | xsv table\n\n"
+  printf "o) what are the projectKeys used by a specific status?\n"
+  printf "\tajcStatuses projectUsages items | grep Estimation | awk -F '\\\t' '{print \$3}' | awk 'BEGIN {RS=\",\"}; {print \"ajcProjects projectKeyById \" \$1}'\n\n"
+  ;;
+esac

@@ -1,0 +1,690 @@
+#!/bin/zsh
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-filters/#api-group-filters
+source ac_lib `basename $0`
+typeset -r expandParam="description,favourite,favouritedCount,jql,owner,searchUrl,sharePermissions,editPermissions,isWritable,subscriptions,viewUrl"
+typeset -r csv_default_Keys="id,name,owner_accountId,owner_displayName,favouritedCount,viewUrl"
+typeset -Ar Array_filterDefaultSharePermission_validScopes=( [GLOBAL]=1 [AUTHENTICATED]=2 [PRIVATE]=3 )
+integer -r maxResults=100
+integer recordCount
+integer numPages
+
+function count() {
+  recordCount=`curl -s -X GET --url "${ac_url}filter/search?overrideSharePermissions=true" -u "$ac_user" -H "$h_a_json" | jq '.total'`
+  numPages=${recordCount}/${maxResults}
+}
+function getAvailableKeys() {
+  count
+  if [ $recordCount -gt 0 ]; then
+    availableKeysArray=(`curl -s -X GET --url "${ac_url}filter/search?overrideSharePermissions=true&expand=${expandParam}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[0] | keys_unsorted | .[]'`)
+    stringOfAvailableKeys=$(printf "(%s)" ${(j: | :)availableKeysArray})
+  fi
+}
+getAvailableKeys
+
+typeset -A commandUsages
+commandUsages=([count]="%s:\t\tcounts the number of filters.\n\t\tArguments: (live | archived | deleted | all)\n")
+commandUsages+=([valuesbykey]="%s:\tretrieves values for keys(s).\n\t\tArguments: [-i <id> n] -k <key> n\n\t\tavailable keys: ${stringOfAvailableKeys}\n")
+commandUsages+=([json]="%s:\t\treturns actors and their roles in json format. By default for all projects and roles.\n\t\tArguments: [-p <projectIdOrKey> n] [-r <roleId> n]\n")
+commandUsages+=([csv]="%s:\t\treturns filters in csv format.\n\t\tArguments: [-k <key1>] [-k <key2>]\n\t\tavailable keys: ${stringOfAvailableKeys}\n\t\tdefault keys: ${csv_default_Keys}\n")
+commandUsages+=([delete]="%s:\t\tdelete filter(s)\n\t\tArguments: [-f <filterId> n]\n\t\t[-s]\t\tfor silent mode\n")
+commandUsages+=([updatejql]="%s:\tupdates the JQL of filter(s)\n\t\tArguments: [-f <filterId> n] [-v] [-s] [-j <JQL>] [-g <searchString>] [-r <replaceString>]\n\t\t[-v]\t\tverify only\n\t\t[-s]\t\tsilent mode\n") 
+commandUsages+=([updateowner]="%s:\tupdates the owner of filter(s)\n\t\tArguments: (-o <owner> [-f <filterId> n] | -i <inputFile>) [-s]\n\t\t[-s]\t\tsilent mode\n")
+commandUsages+=([shareperm]="%s:\tSet type:group share permissions (edit | view) of filter(s)\n\t\tArguments: -r (view | edit) -g <groupIdOrName> [-i <id> n] [-s]\n\t\t-s\t\tsilent mode\n")
+commandUsages+=([defaultshare]="%s:\tGet or set default share\n\t\tArguments: -m (get|set) -c (${(k)Array_filterDefaultSharePermission_validScopes})\n")
+commandUsages+=([template]="%s:\ttemplates a curl command\n\t\tArguments: none\n")
+
+function getAllValuesForKey() {
+  if [ ! -z $1 ]; then
+    count
+    integer local_startIndex
+    integer local_pageCounter
+    for local_pageCounter in {0..$numPages}; do
+      local_startIndex=${local_pageCounter}*${maxResults}
+      curl -s -X GET --url "${ac_url}filter/search?overrideSharePermissions=true&startAt=${local_startIndex}&maxResults=${maxResults}" -u "$ac_user" -H "$h_a_json" | jq -r --arg key $1 '.values[][$key]'
+    done
+  else
+    printf "getAllValuesForKey() needs \"key\" parameter\n"
+  fi
+}
+
+function getFilterValues() {
+  if [ ! -z $1 ]; then
+    typeset http_response=`curl -i -s -X GET --url "${ac_url}filter/${1}?overrideSharePermissions=true" -u "$ac_user" -H "$h_a_json"`
+    typeset http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
+    typeset http_json_string=$(echo $http_response | grep "^{")
+    if [ $http_return_code -eq 200 ]; then
+      filterOwnerAccountId=`echo $http_json_string | jq -r '.owner.accountId'`
+      filterOwnerDisplayName=`echo $http_json_string | jq -r '.owner.displayName'`
+      filterName=`echo $http_json_string | jq -r '.name'`
+      filterJQL=`echo $http_json_string | jq -r '.jql'`
+      unset getFilterValuesErrorMessages
+    else
+      getFilterValuesErrorMessages="${http_return_code}-`echo $http_json_string | jq -r '.errorMessages[]'`"
+      filterOwnerAccountId="N/A"
+      filterOwnerDisplayName="N/A"
+      filterName="N/A"
+      filterJQL="N/A"
+    fi
+  else
+    printf "getFilterValues() needs \"id\" parameter\n"
+  fi
+}
+
+case ${1:l} in
+"count")
+  count
+  printf "%u\n" ${recordCount}
+  ;;
+
+"valuesbykey")
+  subCommand=${1:l}
+  shift
+  typeset -a option_IDs
+  typeset -a option_Keys
+  while getopts ":i:k:" opt; do
+    case $opt in
+    i)
+      option_IDs+=$OPTARG
+      ;;
+    k)
+      option_Keys+=$OPTARG
+      ;;
+    *)
+      printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+      exit  
+      ;;
+    esac
+  done
+  shift $((OPTIND-1))
+  if [ ${#option_Keys[@]} -eq 0 ]; then
+    printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+    exit  
+  fi
+  # 
+  # work one option_Key and all IDs
+  #
+  if [ ${#option_IDs[@]} -eq 0 ]; then 
+    getAllValuesForKey $option_Keys[1]
+    # work done for subCommand
+    exit
+  fi
+  #
+  # work multiple Keys and one or more IDs
+  #
+  for Id in ${option_IDs}; do
+    # https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-filters/#api-rest-api-3-filter-id-get
+    http_response=`curl -i -s -X GET --url "${ac_url}filter/${Id}?expand=sharedUsers,subscriptions" -u "$ac_user" -H "$h_a_json"`
+    http_return_code=`echo $http_response | grep "^HTTP" | awk '{print $2}'`
+    http_json_string=`echo $http_response | grep "^{"`
+    if [ $http_return_code -eq 200 ]; then
+      typeset -a temp_array_jsonValues
+      for key in ${option_Keys}; do
+        temp_array_jsonValues+=`echo $http_json_string | jq -r --arg key ${key} '.[$key]'`
+      done
+      echo ${(j:,:)temp_array_jsonValues}
+      unset temp_array_jsonValues
+    fi
+  done
+  ;;
+
+"csv")
+# typeset -r csv_default_Keys="id,name,owner_accountId,owner_displayName,favouritedCount,viewUrl"
+  subCommand=${1:l}
+  shift
+  typeset -a option_Keys
+  while getopts ":k:" opt; do
+    case $opt in
+    k)
+      option_Keys+=$OPTARG
+      ;;
+    *)
+      printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+      exit  
+      ;;
+    esac
+  done
+  shift $((OPTIND-1))
+  if [ ${#option_Keys[@]} -gt 2 ]; then
+    printf "%s:\tsorry, max 2 key -(k) options\n" ${subCommand} $OPTARG
+    exit
+  fi
+  if [ ${#option_Keys[@]} -eq 0 ]; then
+    printf "%s\n" ${csv_default_Keys}
+  else
+    printf "id,owner,%s\n" ${(j:,:)option_Keys}
+  fi
+  count
+  integer startIndex
+  integer pageCounter
+  for pageCounter in {0..$numPages}; do
+    startIndex=${pageCounter}*${maxResults}
+    if [ ${#option_Keys[@]} -eq 0 ]; then
+      curl -s -X GET --url "${ac_url}filter/search?overrideSharePermissions=true&expand=${expandParam}&startAt=${startIndex}&maxResults=${maxResults}" -u "$ac_user" -H "$h_a_json" | \
+        jq -r '.values[] | [.id, .name, .owner.accountId, .owner.displayName, .favouritedCount, .viewUrl] | @csv'      
+    fi
+    if [ ${#option_Keys[@]} -eq 1 ]; then
+      curl -s -X GET --url "${ac_url}filter/search?overrideSharePermissions=true&expand=${expandParam}&startAt=${startIndex}&maxResults=${maxResults}" -u "$ac_user" -H "$h_a_json" | \
+        jq -r --arg key1 ${option_Keys[1]} '.values[] | [ .id, .owner.displayName, .[$key1] ] | @csv'
+    fi
+    if [ ${#option_Keys[@]} -eq 2 ]; then
+        curl -s -X GET --url "${ac_url}filter/search?overrideSharePermissions=true&expand=${expandParam}&startAt=${startIndex}&maxResults=${maxResults}" -u "$ac_user" -H "$h_a_json" | \
+          jq -r --arg key1 ${option_Keys[1]} --arg key2 ${option_Keys[2]} '.values[] | [ .id, .owner.displayName, .[$key1], .[$key2] ] | @csv'
+    fi
+  done
+  ;;
+
+"json")
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-filters/#api-rest-api-3-filter-search-get
+  count
+  integer startIndex
+  integer pageCounter
+  for pageCounter in {0..$numPages}; do
+    startIndex=${pageCounter}*${maxResults}
+    curl -s -X GET --url "${ac_url}filter/search?orderBy=name&overrideSharePermissions=true&expand=${expandParam}&startAt=${startIndex}&maxResults=${maxResults}" -u "$ac_user" -H "$h_a_json" | jq '.values[]'
+  done
+  ;;
+
+"delete")
+  subCommand=${1:l}
+  shift
+  while getopts ":i:s" opt; do
+    case $opt in
+    i)
+      if [ ! -v Array_Id_Name ]; then
+        # initialize only once, when needed
+        typeset -A Array_Id_Name=(`ajcFilters csv | sed "s/[\"'<>()&]//g" | sed "s/ /_/g" | awk -F ',' '{print $1 " " $2}' | tail -n +2`)
+        typeset -A option_Array_Id_Name
+      fi
+      if [ ! -z ${Array_Id_Name[$OPTARG]} ]; then
+        option_Array_Id_Name+=([$OPTARG]=${(v)Array_Id_Name[$OPTARG]})
+      else
+        printf "%s:\tid %s not valid\n" ${subCommand} $OPTARG
+        exit
+      fi
+      ;;
+    s)
+      option_Silent="true"
+      ;;
+    *)
+      printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+      exit  
+      ;;
+    esac
+  done
+  shift $((OPTIND-1))
+  if [ ! -v option_Array_Id_Name ]; then
+    # emtpy option means work all
+    typeset -A option_Array_Id_Name=(`ajcFilters csv | sed "s/[\"'<>()&]//g" | sed "s/ /_/g" | awk -F ',' '{print $1 " " $2}' | tail -n +2`)
+  fi
+  #
+  # request user confirmation
+  #
+  if [ ! -v option_Silent ]; then
+    printf "delete %u filter" ${#option_Array_Id_Name[@]}
+    if [ ${#option_Array_Id_Name[@]} -gt 1 ]; then
+      printf "s"
+    fi
+    printf ":[\n"; printf "%s " ${(k)option_Array_Id_Name}; printf "\n]\n"
+    vared -p "Let's do it, yes? " -c YesNo
+    if [[ ${YesNo} != [Yy]* ]]; then
+      printf "All good, nothing happened.\n"
+      exit
+    fi
+  fi
+  # delete - main
+  typeset -r LogFile="${ac_command}_${subCommand}_log_${timestampDateOnly}T${timestampTimeOnly}.csv"
+  printf "id,result\n" | tee -a ${LogFile}
+  for Id in ${(k)option_Array_Id_Name}; do
+    printf "%s," ${Id} | tee -a ${LogFile}
+    http_response=`curl -i -s -X DELETE --url "${ac_url}filter/${Id}" -u "$ac_user"`
+    http_return_code=`echo ${http_response} | grep "^HTTP" | awk '{print $2}'`
+    if [ $http_return_code -eq 204 ]; then
+      printf "deleted\n" | tee -a ${LogFile}
+    else
+      errorMessage=`echo $http_response | grep "^{" | jq -r '.errorMessages[]'`
+      printf "%u-%s\n" $http_return_code ${errorMessage} | tee -a ${LogFile}
+    fi
+  done
+  ;;
+
+"updatejql")
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-filters/#api-rest-api-3-filter-id-put
+  subCommand=${1:l}
+  shift
+  typeset -A Array_filterId_filterName=(`ajcFilters csv | sed "s/[\"'<>()&]//g" | sed "s/ /_/g" | awk -F ',' '{print $1 " " $2}' | tail -n +2`)
+  typeset -A option_Array_filterId_filterName
+  while getopts ":f:j:g:r:sv" opt; do
+    case $opt in
+    f)
+      if [ ! -z ${Array_filterId_filterName[$OPTARG]} ]; then
+        option_Array_filterId_filterName+=([$OPTARG]=${(v)Array_filterId_filterName[$OPTARG]})
+      else
+        printf "%s:\tfilter %s not valid\n" ${ac_command} $OPTARG
+        exit
+      fi
+      ;;
+    j)
+      option_JQL=$OPTARG
+      ;;
+    g)
+      option_searchString=$OPTARG
+      ;;
+    r)
+      option_replaceString=$OPTARG
+      ;;
+    s)
+      option_Silent="true"
+      ;;
+    v)
+      option_JQL_verify="true"
+      ;;
+    *)
+      printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+      exit  
+      ;;
+    esac
+  done
+  shift $((OPTIND-1))
+  #
+  # making sense of user options
+  #
+  if [[ -v option_JQL && ( -v option_searchString || -v option_replaceString ) ]]; then
+    printf "%s:\tOption -j and (-g -r) is mutually exclusive.\n" $ac_command
+    printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+    exit
+  fi
+  if [ ! -v option_searchString -o ! -v option_replaceString -a ! -v option_JQL ] && [ ${#option_Array_filterId_filterName[@]} -gt 0 ] && [ ! -v option_JQL ]; then
+    printf "%s:\tUse option -g (search) and -r (replace) as a logical pair.\n" $ac_command
+    printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+    exit
+  fi
+  if [ -v option_JQL -a ${#option_Array_filterId_filterName[@]} -ne 1 ]; then
+    printf "%s:\tOption -j allows for only 1 filterId.\n" $ac_command
+    exit
+  fi
+  if [ ${#option_Array_filterId_filterName[@]} -eq 0 ]; then
+    # no Filter means work all filters
+    option_Array_filterId_filterName=(${(kv)Array_filterId_filterName})
+  fi
+  #
+  # request user confirmation
+  #
+  if [ ! -v option_Silent ]; then
+    if [ -v option_JQL ]; then
+      getFilterValues ${(k)option_Array_filterId_filterName}
+      printf "For filter %s, set JQL\nfrom:\n\t%s\nto:\n\t%s\n" "${(kv)option_Array_filterId_filterName}" ${filterJQL} ${option_JQL} 
+    fi
+    if [ -v option_searchString -a -v option_replaceString ]; then
+      printf "Replace \"%s\" with \"%s\" for filterIds:\n[%s]\n" "$option_searchString" "$option_replaceString" "${(kv)option_Array_filterId_filterName}"
+    fi
+    vared -p "Let's do it, yes? " -c YesNo
+    if [[ ${YesNo} != [Yy]* ]]; then
+      printf "All good, nothing happened.\n"
+      exit
+    fi
+  fi
+  # start loop
+  typeset -r LogFile="${ac_command}_${subCommand}_log_${timestampDateOnly}T${timestampTimeOnly}.csv"
+  for filterId in ${(k)option_Array_filterId_filterName}; do
+    # getFilterValues sets filterOwnerAccountId filterOwnerDisplayName filterName filterJQL
+    getFilterValues ${filterId}
+    if [ ! -z ${getFilterValuesErrorMessages} ]; then
+      printf "%u,getFilterValuesErrorMessages:%s\n" ${filterId} ${getFilterValuesErrorMessages} | tee ${LogFile}
+      exit 2
+    fi
+    # Mode s/search/replace/g
+    if [ -v option_searchString -a -v option_replaceString ]; then
+      echo ${filterJQL} | sed "/\s\{1,\}${option_searchString}/q1" > /dev/null
+      temp_sed_SearchResult=$?
+      if [ ${temp_sed_SearchResult} -ne 1 ]; then
+        printf "%u,noMatch:%s\n" ${filterId} ${option_searchString} | tee ${LogFile}
+        continue
+      fi
+      unset temp_sed_SearchResult
+      newFilterJQL=`echo ${filterJQL} | sed "s/\s\{1,\}${option_searchString}/ ${option_replaceString}/g"`
+    fi
+    # mode set JQL
+    if [ -v option_JQL ]; then
+      newFilterJQL=${option_JQL}
+    fi
+    http_response=`curl -i -s -X PUT --url "${ac_url}filter/${filterId}?&overrideSharePermissions=true" -u "${ac_user}" -H "${h_a_json}" -H "${h_ct_json}" --data "$(jq -n --arg jql ${newFilterJQL} '{ "jql": $jql }')"`
+    integer http_return_code=`echo $http_response | grep "^HTTP" | awk '{print $2}'`
+    typeset http_json_string=`echo $http_response | grep "^{"`
+    if [ $http_return_code -eq 200 ]; then
+      printf "%u,updated\n" ${filterId} | tee ${LogFile}
+    fi
+    if [ $http_return_code -ge 400 ]; then
+      typeset errorMessage=`echo $http_json_string | jq -r '.errors[]'`
+      printf "%u,%u-%s-%s\n" ${filterId} ${http_return_code} ${errorMessage} ${newFilterJQL} | tee ${LogFile}
+    fi
+  done
+  ;;
+
+"updateowner")
+  subCommand=${1:l}
+  shift
+  typeset -a option_Filters
+  typeset -A Array_filterId_accountId
+  typeset -A Array_filterId_filterName=(`ajcFilters csv | sed "s/[\"'<>()&]//g" | sed "s/ /_/g" | awk -F ',' '{print $1 " " $2}' | tail -n +2`)
+  while getopts ":f:i:o:s" opt; do
+    case $opt in
+    f)
+      if [ ! -z ${Array_filterId_filterName[$OPTARG]} ]; then
+        option_Filters+=$OPTARG
+      else
+        printf "%s:\tfilter %s not valid\n" ${ac_command} $OPTARG
+        exit
+      fi
+      ;;
+    i)
+      option_inputFile=$OPTARG
+      ;;
+    o)
+      accountName=`aacUsers getDisplayNameByAccountId "$OPTARG"`
+      if [ ! -z  ${accountName} ]; then
+        # accountId exists
+        accountId=$OPTARG
+      else
+        # try match by name
+        accountId=`aacUsers getAccountIdByDisplayName "${OPTARG}"`
+        if [ ! -z $accountId ] && [ $(echo $accountId | wc -l) -eq 1 ]; then
+          # guarantee unique match
+          accountName=`aacUsers getDisplayNameByAccountId $accountId`
+        else
+          printf "%s:\t\"%s\" is not a valid user\n" ${subCommand} $OPTARG
+          exit
+        fi
+      fi
+      ;;
+    s)
+      option_Silent="true"
+      ;;
+    *)
+      printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+      exit  
+      ;;
+    esac
+  done
+  shift $((OPTIND-1))
+  # making sense of user options
+  if [ -v option_inputFile -a -v accountId ]; then
+    printf "%s:\tOption -i and -o are mutually exclusive.\n" $ac_command
+    printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+    exit
+  fi
+  if [ ! -v option_inputFile -a ! -v accountId ]; then
+    printf "%s:\tEither option -i or -o must be set.\n" $ac_command
+    printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+    exit
+  fi
+  echo "hello"
+  if [ -v option_inputFile ]; then
+    if [ -f $option_inputFile ]; then
+      Array_filterId_accountId=(`xsv select filterId,oldOwnerId ${option_inputFile} | tr ',' ' '`)
+    else
+      printf "%s:\t\File "%s" not found.\n" $ac_command "$option_inputFile"
+    fi
+  fi
+  if [ ! -v option_inputFile ] && ; then
+    if [ ${#option_Filters[@]} -eq 0 ] ; then
+      # work all filters
+      option_Filters=(`getAllValuesForKey "id"`)
+    fi
+    Array_filterId_accountId=(  )
+    for filterId in ${option_Filters}; do
+      Array_filterId_accountId+=([$filterId]=$accountId)
+    done
+    unset option_Filters
+  fi
+  #
+  # request user confirmation
+  #
+  if [ ! -v option_Silent ]; then
+    if [ ! -v option_inputFile ]; then
+      printf "Update owner to %s for %u Filter" ${accountName} ${#Array_filterId_accountId[@]}
+      if [ ${#Array_filterId_accountId[@]} -gt 1 ]; then
+        printf "s"
+      fi
+      printf ":[\n"
+      printf "%s " ${(k)Array_filterId_accountId}
+      printf "\n]\n"
+    fi
+    if [ -v option_inputFile ]; then
+      printf "Update owner from file \"%s\". Showing first 3 lines:\n" "$option_inputFile"
+      xsv select filterId,oldOwnerId ${option_inputFile} | head -3
+    fi
+    vared -p "Let's do it, yes? " -c YesNo
+    if [[ ${YesNo} != [Yy]* ]]; then
+      printf "All good, nothing happened.\n"
+      exit
+    fi
+  fi
+  # start loop
+  typeset -r LogFile="${ac_command}_${subCommand}_log_${timestampDateOnly}T${timestampTimeOnly}.tsv"
+  printf "filterId\tfilterName\toldOwnerId\toldOwnerName\tnewOwnerId\tnewOwnerName\trequestResponse\n" | tee ${LogFile}
+  integer countSuccess=0
+  integer countFailure=0
+  for filterId accountId in ${(kv)Array_filterId_accountId}; do
+    # FIXME add sequence/${#Array_filterId_accountId[@]} to know how far it got 
+    displayName="`aacUsers getDisplayNameByAccountId ${accountId}`"
+    # getFilterValues sets filterOwnerAccountId filterOwnerDisplayName filterName filterJQL
+    getFilterValues ${filterId} 
+    printf "%u\t%s\t%s\t%s\t%s\t%s\t" ${filterId} ${filterName} ${filterOwnerAccountId} ${filterOwnerDisplayName} ${accountId} ${displayName} | tee -a ${LogFile}
+    http_response=`curl -i -s -X PUT --url "${ac_url}filter/${filterId}/owner" -u "${ac_user}" -H "${h_a_json}" -H "${h_ct_json}" --data "$(jq -n --arg id "${accountId}" '{"accountId": $id}')"`
+    http_return_code=`echo ${http_response} | grep "^HTTP" | awk '{print $2}'`
+    if [ 204 -eq ${http_return_code} ]; then
+      printf "success\n" | tee -a ${LogFile}
+      countSuccess=${countSuccess}+1
+    else
+      http_json_response=`echo ${http_response} | grep "^{"`
+      errorMessage=`echo $http_json_response | jq -r '.errorMessages[]'`
+      printf "errorCode:%u|errorMessage:%s|JQL:%s\n" ${http_return_code} ${errorMessage} ${filterJQL} | tee -a ${LogFile}
+      countFailure+=1
+    fi
+  done
+  printf "\nProcessed %u filter(s) of which %u failed.\n" $((${countSuccess}+${countFailure})) ${countFailure}
+  ;;
+
+"shareperm")
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-filter-sharing/#api-rest-api-3-filter-id-permission-post
+# FIXME implement remove loggedin share
+# FIXME raise a bug "unable to set edit share permission if view share permission is "loggedin"
+  subCommand=${1:l}
+  shift
+  typeset -A Array_sharePermission_Rights=( [1]="VIEW" [3]="EDIT" )
+  while getopts ":i:r:g:s" opt; do
+    case $opt in
+    i)
+      if [ ! -v Array_Id_Name ]; then
+        # lazy loading, initialize only once, when needed
+        typeset -A Array_Id_Name=(`ajcFilters csv | sed "s/[\"'<>()&]//g" | sed "s/ /_/g" | awk -F ',' '{print $1 " " $2}' | tail -n +2`)
+        typeset -A option_Array_Id_Name
+      fi
+      if [ ! -z ${Array_Id_Name[$OPTARG]} ]; then
+        option_Array_Id_Name+=([$OPTARG]=${(v)Array_Id_Name[$OPTARG]})
+      else
+        printf "%s:\tfilter %s not valid\n" ${ac_command} $OPTARG
+        exit
+      fi
+      ;;
+    r)
+      case ${OPTARG:l} in
+      "view")
+        integer -r rights=1
+        ;;
+      "edit")
+        integer -r rights=3
+        ;;
+      *)
+        printf "%s:\tOption rights (-r) must be either view or edit\n" ${ac_command}
+        exit
+        ;;
+      esac
+      ;;
+    g)
+      integer -r length_groupIdOrName=`echo -n $OPTARG | wc -c`
+      if [ ${length_groupIdOrName} -eq 36 ]; then
+        groupId=$OPTARG
+        groupName=`aacGroups groupNameById $groupId`
+      else
+        # resolve groupName
+        groupId=`aacGroups groupIdByName $OPTARG`
+        if [ -z ${groupId} ]; then
+          printf "%s:\t\"%s\" is not a valid group\n" ${ac_command} $OPTARG
+          exit
+        else
+          groupName=$OPTARG
+        fi
+      fi
+      ;;
+    s)
+      option_Silent="true"
+      ;;
+    *)
+      printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+      exit  
+      ;;
+    esac
+  done
+  shift $((OPTIND-1))
+  # making sense of user options
+  if [ ! -v rights -o ! -v groupId ]; then
+    printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+    exit
+  fi
+  if [ ${#option_Array_Id_Name[@]} -eq 0 ]; then
+    # no Filter means work all filters
+    typeset -A option_Array_Id_Name=(`ajcFilters csv | sed "s/[\"'<>()&]//g" | sed "s/ /_/g" | awk -F ',' '{print $1 " " $2}' | tail -n +2`)
+  fi
+  #
+  # request user confirmation
+  #
+  if [ ! -v option_Silent ]; then
+    printf "Set %s share permission for group %s (%s) on " ${(v)Array_sharePermission_Rights[$rights]} $groupName $groupId
+    printf "%u filter" ${#option_Array_Id_Name[@]}
+    if [ ${#option_Array_Id_Name[@]} -gt 1 ]; then
+      printf "s"
+    fi
+    printf ":[\n"; 
+    printf "%s " ${(k)option_Array_Id_Name}
+    printf "\n]\n"
+  fi
+  vared -p "Let's do it, yes? " -c YesNo
+  if [[ ${YesNo} != [Yy]* ]]; then
+    printf "All good, nothing happened.\n"
+    exit
+  fi
+  #
+  # main loop
+  #
+  typeset -r LogFile="${ac_command}_${subCommand}_log_${timestampDateOnly}T${timestampTimeOnly}.csv"
+  printf "Id,requestResponse\n"
+  for Id in ${(k)option_Array_Id_Name}; do
+    http_response=`curl -i -s -X POST --url "${ac_url}filter/${Id}/permission" -u "${ac_user}" -H "${h_a_json}" -H "${h_ct_json}" --data "$(jq -n --arg rights ${rights} --arg groupId ${groupId} '{ "rights": $rights, "type": "group", "groupId": $groupId }')"`
+    integer http_return_code=`echo $http_response | grep "^HTTP" | awk '{print $2}'`
+    http_json_response=`echo $http_response | grep "^{"`
+    if [ $http_return_code -eq 201 ]; then
+      printf "%u,set\n" ${Id} | tee -a ${LogFile}
+    fi
+    if [ $http_return_code -ge 400 ]; then
+      errorMessage=`echo ${http_json_response} | jq '.errors[]'`
+      printf "%u,%u-%s\n" ${Id} ${http_return_code} ${errorMessage} | tee -a ${LogFile}
+    fi
+  done
+  ;;
+
+"defaultshare")
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-filter-sharing/#api-rest-api-3-filter-defaultsharescope-put
+  subCommand=${1:l}
+  shift
+  while getopts ":m:c:" opt; do
+    case $opt in
+    m)
+     case ${OPTARG:l} in
+      "set")
+        option_Mode="set"
+        ;;
+      "get")
+        option_Mode="get"
+        ;;
+      *)
+        printf "%s:\tMode (-m) must be either set or get\n" ${ac_command}
+        exit
+      esac
+      ;;
+    c)
+      if [ ! -z ${Array_filterDefaultSharePermission_validScopes[$OPTARG]} ]; then
+        option_Scope=$OPTARG
+      else
+        printf "%s:\t\"%s\" is not a valid scope. Valid scopes are: %s.\n" ${ac_command} $OPTARG "${(k)Array_filterDefaultSharePermission_validScopes}"
+        exit
+      fi
+      ;;
+    *)
+      printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+      exit  
+      ;;
+    esac
+  done
+  shift $((OPTIND-1))
+  if [ ! -v option_Mode -a ! -v option_Scope ]; then
+      printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+      exit  
+  fi    
+  if [[ $option_Mode == "set" && ! -v option_Scope ]]; then
+    printf "%s:\tScope (-c) must be set\n" ${ac_command}
+    printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+    exit
+  fi
+
+  case $option_Mode in
+  "get")
+    curl -s -X GET --url "${ac_url}filter/defaultShareScope" -u "$ac_user" -H "$h_a_json" | jq -r '.scope'
+    ;;
+  "set")
+    http_response=`curl -i -s -X PUT --url "${ac_url}filter/defaultShareScope" -u "$ac_user" -H "$h_a_json" -H "${h_ct_json}" --data "$(jq -n --arg scope ${option_Scope} '{ "scope": $scope }')"`
+    integer http_return_code=`echo $http_response | grep "^HTTP" | awk '{print $2}'`
+    typeset http_json_string=`echo $http_response | grep "^{"`
+    if [ $http_return_code -eq 200 ]; then
+      printf "%s,set\n" ${option_Scope}
+    fi
+    if [ $http_return_code -ge 400 ]; then
+      typeset errorMessage=`echo $http_json_string | jq -r '.errorMessages[]'`
+      printf "%s,%u-%s\n" ${option_Scope} ${http_return_code} ${errorMessage}
+    fi
+    ;;
+  esac
+  ;;
+
+"FixFilterIds")
+  # create a onPremFilterIdLookupTable.csv file
+  # get list of filterIds that have the keyword "filter" in the JQL
+    ajcFilters csv jql | xsv search -s jql "(?i)Filter" | xsv table 
+  # parse out the the onPrem_filterID and look-up the onPrem_filterName from the onPremFilterIdLookupTable.csv
+  # find the cloud_filterId using the onPrem_filterName
+  # update the JQL by replacing the filterId
+  # done
+  ;;
+
+"help")
+  printf "\nHelp for %s commands:\n\n" $(basename "$0")
+  for command commandUsage in ${(kv)commandUsages}; do
+    printf ${commandUsage} ${command}
+    printf "\n"
+  done
+  printf "%s - usage examples:\n" $ac_command
+  printf "  o) find a filter by name using the json subCommand\n"
+  printf "\t%s json | jq '.values[] | select(.name == \"<filterName>\")'\n" $ac_command
+  printf "  o) find a filter by searching the JQL with a keyword\n"
+  printf "\t%s csv jql | xsv search -s jql \"(?i)<keyword>\" | xsv table\n" $ac_command
+  printf "  o) find a filter by searching the displayName with a keyword\n"
+  printf "\t%s csv | xsv search -s owner_displayName \"(?i)<keyword>\"\n" $ac_command
+  printf "  o) find filters that have the loggedin shared permission and open URL in the system browser\n"
+  printf "\t%s json | jq 'select(.sharePermissions[].type == \"loggedin\" )' | jq -r '[ (.id|tonumber), .name, .viewUrl ] | @csv' > ajcFilters_shareperm_with_loggedin.csv\n" $ac_command
+  printf "\tcat ajcFilters_shareperm_with_loggedin.csv | awk -F ',' '{print \"open \" $3}' > ajcFilters_shareperm_with_loggedin_open_in_browser.sh\n"
+  ;;
+
+*)
+  $(basename "$0") help
+  ;;
+esac

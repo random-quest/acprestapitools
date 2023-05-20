@@ -1,0 +1,50 @@
+#!/bin/zsh
+source ac_lib `basename $0`
+declare -a available_keywords=("count" "getids" "csv" "delete")
+if [[ -z $1 ]]; then; user_keyword="hugo"; else; user_keyword=$1; fi
+if ! is_keyword_valid ${user_keyword} ${available_keywords[@]}; then; exit 0; fi
+
+getids()
+{
+curl -s -X GET --url "${ac_url}issuetypescheme" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[] | select(.id|tonumber != 10000).id'
+}
+
+case $1 in
+"count")
+  getids | wc -l
+  ;;
+"getids")
+  getids
+  ;;
+"csv")
+  curl -s -X GET --url "${ac_url}issuetypescheme" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[] | [ .id, .name, .description ] | @csv'
+  ;;
+"delete")
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-type-schemes/#api-rest-api-3-issuetypescheme-issuetypeschemeid-delete
+  typeset -r deleteLogFile="ajcITS_DeleteLog_${timestampDateOnly}T${timestampTimeOnly}.csv"
+  if [ -z $2 ]; then
+    print_command_usage $1 "(issueTypeSchemeId | X)"
+    exit
+  fi
+  typeset -a issueTypeSchemeIds
+  if [[ ${2:u} == "X" ]]; then
+    issueTypeSchemeIds=(`getids`)
+  else
+    issueTypeSchemeIds=$2
+  fi
+  for issueTypeSchemeId in ${issueTypeSchemeIds}; do
+    printf "%u," ${issueTypeSchemeId} | tee -a ${deleteLogFile}
+    http_response=`curl -i -s -X DELETE --url "${ac_url}issuetypescheme/${issueTypeSchemeId}" --user "${ac_user}"`
+    http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
+    if [ $http_return_code -eq 204 ]; then
+      printf "deleted\n" | tee -a ${deleteLogFile}
+      continue
+    fi
+    if [ $http_return_code -ge 400 ]; then
+      json_error_response=`echo $http_response | grep -E "{\"errorMessage"`
+      printf "%u-%s\n" $http_return_code ${json_error_response} | tee -a ${deleteLogFile}
+      continue
+    fi
+  done
+  ;;
+esac

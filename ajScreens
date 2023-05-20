@@ -1,0 +1,245 @@
+#!/bin/zsh
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-screens/#api-group-screens
+source ac_lib `basename $0`
+integer -r maxResults=50
+integer recordCount
+integer numPages
+function getAvailableKeys() {
+  typeset local_availableKeysArray=(`curl -s -X GET --url "${ac_url}screens" -u "${ac_user}" -H  "${h_a_json}" | jq -r '.values[0] | keys_unsorted | .[]'`)
+  stringOfAvailableKeys=$(printf "(%s)" ${(j: | :)local_availableKeysArray})
+}
+getAvailableKeys
+
+typeset -A commandUsages
+commandUsages=([count]="%s:\t\tcounts the number of screens.\n\t\tArguments: [(GLOBAL | TEMPLATE | PROJECT)] default is GLOBAL\n")
+commandUsages+=([valuesbykey]="%s:\tretrieves values for keys(s).\n\t\tArguments: [-i <id> n] -k <key> n\n\t\tavailable keys: ${stringOfAvailableKeys}\n")
+commandUsages+=([csv]="%s:\t\treturns custom fields in csv format.\n\t\tArguments: [(GLOBAL | TEMPLATE | PROJECT)] default is GLOBAL\n\t\t[-s]\tsuppress header\n")
+commandUsages+=([json]="%s:\t\tjson format.\n\t\tArguments: [(GLOBAL | TEMPLATE | PROJECT)] default is GLOBAL\n")
+commandUsages+=([delete]="%s:\t\tdelete screen(s)\n\t\tArguments: [-i <Id> n]\n\t\t[-s]\tfor silent mode\n")
+
+function count() {
+  if [ ! -z $1 ]; then
+    recordCount=`curl -s -X GET --url "${ac_url}screens?maxResults=1&scope=$1" -u "${ac_user}" -H "${h_a_json}" | jq '.total'`
+    numPages=${recordCount}/${maxResults}
+  else
+    printf "count() needs \"type\" parameter\n"
+  fi
+}
+
+function getAllValuesForKey() {
+  if [ ! -z $1 ]; then
+    count "GLOBAL"
+    integer local_startIndex
+    integer local_pageCounter
+    for local_pageCounter in {0..$numPages}; do
+      local_startIndex=${local_pageCounter}*${maxResults}
+      #curl -s -X GET --url "${ac_url}screens?startAt=${local_startIndex}&maxResults=${maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r --arg key $1 '.values[] | select(.id < 10000)[$key]'
+      curl -s -X GET --url "${ac_url}screens?startAt=${local_startIndex}&maxResults=${maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r --arg key $1 '.values[][$key]'
+    done
+  else
+    printf "getAllValuesForKey() needs \"key\" parameter\n"
+  fi
+}
+
+if [[ ${1:l} == "csv" || ${1:l} == "json" || ${1:l} == "count" ]]; then
+  subCommand=${1:l}
+  typeset Scope
+  case ${2:l} in
+    "GLOBAL")
+      Scope="GLOBAL"
+      ;;
+    "TEMPLATE")
+      Scope="TEMPLATE"
+      ;;
+    "PROJECT")
+      Scope="PROJECT"
+      ;;
+    *)
+      Scope="GLOBAL"
+      ;;
+  esac
+  if [ ! -z $2 ]; then
+    shift 2
+  else
+    shift 1
+  fi
+  while getopts ":s" opt; do
+    case $opt in
+    s)
+      option_Silent="true"
+      ;;
+    *)
+      printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+      exit  
+      ;;
+    esac
+  done
+  if [[ ! -v option_Silent && $subCommand == "csv" ]]; then 
+    printf "id,name,description\n"
+  fi
+  count $Scope
+  if [[ $subCommand == "count" ]]; then
+    printf "%u\n" ${recordCount}
+    exit
+  fi
+  integer startIndex
+  for page in {0..$numPages}; do
+    startIndex=${page}*${maxResults}
+    case $subCommand in
+      "csv")
+        curl -s -X GET --url "${ac_url}screens?startAt=${startIndex}&maxResults=${maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[] | [ .id, .name, .description ] | @csv' | sort
+        ;;
+      "json")
+        curl -s -X GET --url "${ac_url}screens?startAt=${startIndex}&maxResults=${maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[]'
+        ;;
+      esac
+  done
+  exit
+fi
+
+
+case ${1:l} in
+"valuesbykey")
+  subCommand=${1:l}
+  shift
+  typeset -a option_IDs
+  typeset -a option_Keys
+  while getopts ":i:k:" opt; do
+    case $opt in
+    i)
+      option_IDs+=$OPTARG
+      ;;
+    k)
+      option_Keys+=$OPTARG
+      ;;
+    *)
+      printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+      exit  
+      ;;
+    esac
+  done
+  shift $((OPTIND-1))
+  if [ ${#option_Keys[@]} -eq 0 ]; then
+    printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+    exit  
+  fi
+  # 
+  # work one option_Key and all IDs
+  #
+  if [ ${#option_IDs[@]} -eq 0 ]; then 
+    getAllValuesForKey $option_Keys[1]
+    # work done for subCommand
+    exit
+  fi
+  #
+  # work multiple Keys and one or more IDs
+  #
+  for Id in ${option_IDs}; do
+    http_response=`curl -i -s -X GET --url "${ac_url}screens?id=${Id}" -u "$ac_user" -H "$h_a_json"`
+    http_return_code=`echo $http_response | grep "^HTTP" | awk '{print $2}'`
+    http_json_string=`echo $http_response | grep "^{"`
+    if [ $http_return_code -eq 200 ]; then
+      typeset -a temp_array_jsonValues
+      for key in ${option_Keys}; do
+        temp_array_jsonValues+=`echo $http_json_string | jq -r --arg key ${key} '.values[][$key]'`
+      done
+      echo ${(j:,:)temp_array_jsonValues}
+      unset temp_array_jsonValues
+    fi
+  done
+  ;;
+
+"delete")
+  # https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-screens/#api-rest-api-3-screens-screenid-delete
+  # | select(.id >= 10000)
+  subCommand=${1:l}
+  shift
+  while getopts ":ai:" opt; do
+    case $opt in
+    a)
+      option_DeleteAll="true"
+      ;;
+    i)
+      if [ ! -v Array_Id_Name ]; then
+        # initialize only once, when needed
+        typeset -A Array_Id_Name=(`ajcScreens csv GLOBAL -s | sed "s/[\"'<>()&/]//g" | sed "s/ /_/g" | awk -F ',' '{print $1 " " $2}'`)
+        typeset -A option_Array_Id_Name
+      fi
+      if [ ! -z ${Array_Id_Name[$OPTARG]} ]; then
+        option_Array_Id_Name+=([$OPTARG]=${(v)Array_Id_Name[$OPTARG]})
+      else
+        printf "%s:\tid %s not valid\n" ${subCommand} $OPTARG
+        exit
+      fi
+      ;;
+    s)
+      option_Silent="true"
+      ;;
+    *)
+      printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+      exit  
+      ;;
+    esac
+  done
+  shift $((OPTIND-1))
+  #
+  # emtpy option means work all spaces
+  #
+  if [ ! -v option_Array_Id_Name ]; then
+    typeset -A option_Array_Id_Name=(`ajcScreens csv GLOBAL -s | sed "s/[\"'<>()&/]//g" | sed "s/ /_/g" | awk -F ',' '{print $1 " " $2}'`)
+  fi
+  #
+  # request user confirmation
+  #
+  if [ ! -v option_Silent ]; then
+    printf "delete %u screen" ${#option_Array_Id_Name[@]}
+    if [ ${#option_Array_Id_Name[@]} -gt 1 ]; then
+      printf "s"
+    fi
+    printf ":[\n"; 
+    for Id Name in ${(kv)option_Array_Id_Name}; do
+      printf "%-20s,%-50s\n" $Id $Name
+    done
+    printf "]\n"
+    vared -p "Let's do it, yes? " -c YesNo
+    if [[ ${YesNo} != [Yy]* ]]; then
+      printf "All good, nothing happened.\n"
+      exit
+    fi
+  fi
+  #
+  # main loop
+  #
+  if [ ! -v option_Silent ]; then
+    printf "id,name,result\n"
+  fi
+  typeset -r LogFile="${ac_command}_${subCommand}_log_${timestampDateOnly}T${timestampTimeOnly}.tsv"
+  for Id Name in ${(kv)option_Array_Id_Name}; do
+    printf "%u,%s" $Id $Name | tee -a ${LogFile}
+    http_response=`curl -i -s -X DELETE --url "${ac_url}screens/${Id}" -u "${ac_user}"` 
+    http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
+    if [ $http_return_code -eq 204 ]; then
+      printf "deleted\n" | tee -a ${LogFile}
+    fi
+    if [ $http_return_code -ge 400 ]; then
+      json_error_response=`echo $http_response | grep -E "{\"errorMessage"`
+      printf "%u-%s\n" $http_return_code ${json_error_response} | tee -a ${LogFile}
+    fi
+  done
+  ;;
+
+"help")
+  printf "\nHelp for %s commands:\n\n" $(basename "$0")
+  for command commandUsage in ${(kv)commandUsages}; do
+    printf ${commandUsage} ${command}
+    printf "\n"
+  done
+  printf "%s - usage examples:\n" $(basename "$0")
+  printf "  o) find duplicate custom fields\n"
+  printf "\t%s csv | xsv select name | sort | uniq -c | grep -v \"1 \"\n" $ac_command
+  ;;
+
+*)
+  $(basename "$0") help
+  ;;
+esac

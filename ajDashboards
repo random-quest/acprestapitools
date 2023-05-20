@@ -1,0 +1,413 @@
+#!/bin/zsh
+# based on https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-dashboards/#api-group-dashboards
+# Dashboards owned by the user. Not returned for anonymous users.
+# Dashboards shared with a group that the user is a member of. Not returned for anonymous users.
+# Dashboards shared with a private project that the user can browse. Not returned for anonymous users.
+# Dashboards shared with a public project.
+# Dashboards shared with the public.
+source ac_lib `basename $0`
+
+expandParam="description,owner,viewUrl,favourite,favouritedCount,sharePermissions,editPermissions,isWritable"
+function getAvailableKeys() {
+  typeset local_availableKeysArray=(`curl -s -X GET --url "${ac_url}dashboard/search?status=active&expand=${expandParam}" -u "${ac_user}" -H  "${h_a_json}" | jq -r '.values[0] | keys_unsorted | .[]'`)
+  stringOfAvailableKeys=$(printf "(%s)" ${(j: | :)local_availableKeysArray})
+}
+getAvailableKeys
+
+typeset -A commandUsages
+commandUsages+=([count]="%s:\t\tcounts the number of dashboards for this site.\n\t\tArguments: (active | archived | deleted)\n")
+commandUsages+=([getValueByKey]="%s:\tretrieves values for one key.\n\t\tArguments: <key> (active | archived | deleted)\n\t\tavailable keys: ${stringOfAvailableKeys}\n")
+commandUsages+=([json]="%s:\t\tretrievs dashboards in json format.\n\t\tArguments: (active | archived | deleted)\n")
+commandUsages+=([csv]="%s:\t\tretrievs dashboards in csv format.\n\t\tArguments: (active | archived | deleted)\n")
+
+
+integer -r maxResults=50
+integer recordCount
+integer numPages
+
+function getNameById() {
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-dashboards/#api-rest-api-3-dashboard-id-get
+ if [ -z $1 ]; then
+    printf "getNameById() requires parameter dashboardId\n"
+    return 1
+  fi
+  typeset local_http_response=`curl -i -s -X GET --url "${ac_url}dashboard/${1}" -u "${ac_user}" -H "${h_a_json}"`
+  integer local_http_return_code=`echo ${local_http_response} | grep -E "^HTTP" | awk '{print $2}'`
+  if [ ${local_http_return_code} -eq 200 ]; then
+    echo ${local_http_response} | grep -E "^{" | jq '.name'
+    return 0
+  else
+    # return not found
+    return 1
+  fi
+}
+
+function getValueByKey() {
+  if [ ! -z $1 ] && [ ! -z $2 ]; then
+    typeset local_queryParameterStatus
+    case $2 in
+    "active")
+      local_queryParameterStatus="status=active"
+      ;;
+    "archived")
+      local_queryParameterStatus="status=archived"
+      ;;
+    "deleted")
+      local_queryParameterStatus="status=deleted"
+      ;;
+    *)
+      printf "getValueByKey() not valid \"status\" parameter\n"
+      exit
+      ;;
+    esac
+    count $2
+    integer local_startIndex
+    integer local_pageCounter
+    for local_pageCounter in {0..$numPages}; do
+      local_startIndex=${local_pageCounter}*${maxResults}
+      curl -s -X GET --url "${ac_url}dashboard/search?startAt=${local_startIndex}&maxResults=${maxResults}&${local_queryParameterStatus}&expand=${expandParam}" -u "${ac_user}" -H "${h_a_json}" | jq -r --arg key $1 '.values[][$key]' | sort
+    done
+  else
+    if [ -z $1 ]; then
+      printf "getValueByKey() needs the \"key\" parameter\n"
+    fi
+    if [ -z $2 ]; then
+      printf "getValueByKey() needs the \"status\" parameter\n"
+    fi
+  fi
+}
+
+function count() {
+  if [ ! -z $1 ]; then
+    typeset local_queryParameterStatus
+    case $1 in
+    "active")
+      local_queryParameterStatus="status=active"
+      ;;
+    "archived")
+      local_queryParameterStatus="status=archived"
+      ;;
+    "deleted")
+      local_queryParameterStatus="status=deleted"
+      ;;
+    esac
+    recordCount=`curl -s -X GET --url "${ac_url}dashboard/search?${local_queryParameterStatus}" -u "${ac_user}" -H "${h_a_json}" | jq '.total'`
+    numPages=${recordCount}/${maxResults}
+  else
+    prinf "count() needs the \"status\" parameter\n"
+  fi
+}
+
+function isExistsDashboardId() {
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-dashboards/#api-rest-api-3-dashboard-id-get
+ if [ -z $1 ]; then
+    # return not found
+    return 1
+  fi
+  typeset local_http_response=`curl -i -s -X GET --url "${ac_url}dashboard/${1}" -u "${ac_user}" -H "${h_a_json}"`
+  integer local_http_return_code=`echo ${local_http_response} | grep "^HTTP" | awk '{print $2}'`
+  if [ ${local_http_return_code} -eq 200 ]; then
+    # return exists
+    return 0
+  else
+    # return not found
+    return 1
+  fi
+}
+
+case ${1:l} in
+"count")
+  case $2 in
+  "active")
+    ;;
+  "archived")
+    ;;
+  "deleted")
+    ;;
+  *)
+    count "active"; printf "active   %3u\n" ${recordCount}
+    count "archived"; printf "archived %3u\n" ${recordCount}
+    count "deleted"; printf "deleted  %3u\n" ${recordCount}
+    exit
+    ;;
+  esac
+  count $2; printf "%u\n" ${recordCount}
+  ;;
+
+"getvaluebykey")
+  if [ ! -z $2 ]; then
+    case $3 in
+    "active")
+      ;;
+    "archived")
+      ;;
+    "deleted")
+      ;;
+    *)
+      count "active"
+      if [ ${recordCount} -gt 0 ]; then
+        printf "active dashboards:\n" $2
+        getValueByKey $2 "active"
+      fi
+      count "archived"
+      if [ ${recordCount} -gt 0 ]; then
+        printf "archived dashboards:\n" $2
+        getValueByKey $2 "archived"
+      fi
+      count "deleted"
+      if [ ${recordCount} -gt 0 ]; then
+        printf "deleted dashboards:\n" $2
+        getValueByKey $2 "deleted"
+      fi
+      exit
+      ;;
+    esac
+    getValueByKey $2 $3
+  else
+    printf ${commandUsages[getValueByKey]} ${(k)commandUsages[getValueByKey]}
+  fi
+  ;;
+
+"json")
+  case $2 in
+  "active")
+    ;;
+  "archived")
+    ;;
+  "deleted")
+    ;;
+  *)
+    ajcDashboards $1 "active"
+    ajcDashboards $1 "archived"
+    ajcDashboards $1 "deleted"
+    exit
+    ;;
+  esac
+  count $2
+  integer startIndex
+  integer pageCounter
+  for pageCounter in {0..$numPages}; do
+    startIndex=${pageCounter}*${maxResults}
+    curl -s -X GET --url "${ac_url}dashboard/search?startAt=${startIndex}&maxResults=${maxResults}&status=${2}&expand=${expandParam}" -u "${ac_user}" -H "${h_a_json}" | jq '.values[]'
+  done
+  ;;
+
+"csv")
+  typeset -a dashboardStatusesArray
+  case $2 in
+  "active")
+    dashboardStatusesArray=("active")
+    ;;
+  "archived")
+    dashboardStatusesArray=("archived")
+    ;;
+  "deleted")
+    dashboardStatusesArray=("deleted")
+    ;;
+  *)
+    dashboardStatusesArray=("active" "archived" "deleted")
+    ;;
+  esac
+  printf "status,id,name,description,owner,sharePermissions,isFavourite,popularity,isWritable\n"
+  for dashboardStatus in ${dashboardStatusesArray}; do
+    count ${dashboardStatus}
+    integer startIndex
+    integer pageCounter
+    for pageCounter in {0..$numPages}; do
+      startIndex=${pageCounter}*${maxResults}
+      curl -s -X GET --url "${ac_url}dashboard/search?startAt=${startIndex}&maxResults=${maxResults}&status=${dashboardStatus}&expand=${expandParam}" \
+        -u "${ac_user}" -H "${h_a_json}" | \
+        jq -r --arg dashboardStatus ${dashboardStatus} '[.values[]] | sort_by(.name) | .[] | [ $dashboardStatus, (.id|tonumber), .name, .description, .owner.displayName, 
+        (
+          [
+            ((if .sharePermissions[].type == "project" then .sharePermissions[].project else empty end) | select(.!=null) | "Project:" + .key + (if .archived then " [A]" else "" end))
+            ,  
+            ((if .sharePermissions[].type == "group" then .sharePermissions[].group.name else empty end) | select(.!=null) | "Group:" + .)
+            ,
+            (if .sharePermissions[].type == "global" then .sharePermissions[].type else empty end)
+            ,
+            (if .sharePermissions[].type == "loggedin" then .sharePermissions[].type else empty end)
+          ] 
+          | join("|")
+        ), 
+        .isFavourite, .popularity, .isWritable ] | @csv'
+    done
+  done
+  ;;
+
+"gadgets")
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-dashboards/#api-rest-api-3-dashboard-dashboardid-gadget-get
+  case $2 in
+  "json")
+    for dashboardId in `getValueByKey id "active"`; do
+      curl -s -X GET --url "${ac_url}dashboard/${dashboardId}/gadget" | jq
+    done
+    ;;
+  "csv")
+    printf "dashboardId,id,title\n"
+    for dashboardId in `getValueByKey id "active"`; do
+      http_response=`curl -i -s -X GET --url "${ac_url}dashboard/${dashboardId}/gadget"`
+      http_return_code=`echo ${http_response} | grep -E "^HTTP"  | awk '{print $2}'`
+      if [ ${http_return_code} -eq 200 ]; then
+        echo ${http_response} | grep -E "^{" | \
+          jq -r --arg dashboardId ${dashboardId} '.gadgets[] | [ ($dashboardId|tonumber), (.id|tonumber), .title ] | @csv'
+      else
+          json_error_response=`echo ${http_response} | grep -E "^{" | jq '.errorMessages[]'`
+          printf "%u,%u,%s\n" ${dashboardId} ${http_return_code} ${json_error_response}
+      fi
+    done
+    ;;
+  esac
+  ;;
+
+"archive")
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-projects/#api-rest-api-3-project-projectidorkey-archive-post
+  if [ -z $2 ]; then
+    printf ${commandUsages[archive]} ${(k)commandUsages[archive]}
+    exit
+  fi
+  shift
+  typeset -a projectsArray
+  for projectIdOrKey in $*; do
+    isExistsProjectIdOrKey ${projectIdOrKey}
+    isExistsProjectIdOrkey_returnCode=$?
+    if [ ${isExistsProjectIdOrkey_returnCode} -eq 0 ]; then
+      projectsArray+=${projectIdOrKey:u}
+    else
+      if [ ${isExistsProjectIdOrkey_returnCode} -eq 2 ]; then
+        printf "%s already archived.\n" ${projectIdOrKey}
+      else
+        if [ ${isExistsProjectIdOrkey_returnCode} -eq 1 ]; then
+          printf "%s not found.\n" ${projectIdOrKey}
+        else
+          printf "function isExistsProjectIdOrKey() returned unexpectly with %u.\n" ${isExistsProjectIdOrkey_returnCode}
+        fi
+      fi
+    fi
+    shift
+  done
+
+  for projectIdOrKey in ${projectsArray}; do
+    http_response=`curl -i -s -X POST --url "${ac_url}project/${projectIdOrKey}/archive" -u "${ac_user}" -H "${h_a_json}`
+    http_return_code=`echo $http_response | grep "^HTTP" | awk '{print $2}'`
+    if [ $http_return_code -eq 203 ]; then
+      printf "%s,archived\n" ${projectIdOrKey}
+    fi
+    if [ $http_return_code -ge 400 ]; then
+      json_error_response=`echo $http_response | grep -E "{\"errorMessage" | jq '.'`
+      printf "%s,%u-%s\n" ${projectIdOrKey} ${http_return_code} ${json_error_response}
+    fi
+  done
+  ;;
+
+"restore")
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-projects/#api-rest-api-3-project-projectidorkey-restore-post
+  if [ -z $2 ]; then
+    printf ${commandUsages[restore]} ${(k)commandUsages[restore]}
+    exit
+  fi
+  shift
+  typeset -a projectsArray
+  for projectIdOrKey in $*; do
+    isExistsProjectIdOrKey ${projectIdOrKey}
+    isExistsProjectIdOrkey_returnCode=$?
+    if [ ${isExistsProjectIdOrkey_returnCode} -eq 0 ]; then
+      printf "%s project is live.\n" ${projectIdOrKey}
+    else
+      if [ ${isExistsProjectIdOrkey_returnCode} -eq 2 ]; then
+        projectsArray+=${projectIdOrKey:u}
+      else
+        if [ ${isExistsProjectIdOrkey_returnCode} -eq 1 ]; then
+          printf "%s not found.\n" ${projectIdOrKey}
+        else
+          printf "function isExistsProjectIdOrKey() returned unexpectly with %u.\n" ${isExistsProjectIdOrkey_returnCode}
+        fi
+      fi
+    fi
+    shift
+  done
+
+  for projectIdOrKey in ${projectsArray}; do
+    http_response=`curl -i -s -X POST --url "${ac_url}project/${projectIdOrKey}/restore" -u "${ac_user}" -H "${h_a_json}`
+    http_return_code=`echo $http_response | grep "^HTTP" | awk '{print $2}'`
+    if [ $http_return_code -eq 200   ]; then
+      printf "%s,restored\n" ${projectIdOrKey}
+    fi
+    if [ $http_return_code -ge 400 ]; then
+      json_error_response=`echo $http_response | grep -E "{\"errorMessage" | jq '.'`
+      printf "%s,%u-%s\n" ${projectIdOrKey} ${http_return_code} ${json_error_response}
+    fi
+  done
+  ;;
+
+"delete")
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-dashboards/#api-rest-api-3-dashboard-id-delete
+  if [ -z $2 ]; then
+    printf ${commandUsages[delete]} ${(k)commandUsages[delete]}
+    exit
+  fi
+  shift
+  option_DeleteAllDashboards="false"
+  while getopts "a" opt; do
+    case $opt in
+    a)
+      option_DeleteAllDashboards="true"
+      ;;
+    esac
+  done
+  shift $((OPTIND-1))
+
+  typeset -r deleteLogFile="ajcDashboards_DeleteLog_${timestampDateOnly}T${timestampTimeOnly}.csv"
+  typeset -a dashboardIds
+  if [[ ${option_DeleteAllDashboards} == "true" ]]; then
+    dashboardIds=(`getValueByKey id "active"`)
+    dashboardIds+=(`getValueByKey id "archived"`)
+  else
+    for dashboardId in $*; do
+      isExistsDashboardId ${dashboardId}
+      isExistsDashboardId_returnCode=$?
+      if [ ${isExistsDashboardId_returnCode} -eq 1 ]; then
+        printf "%u,,\"not found\"\n" ${dashboardId}
+      else
+        if [ ${isExistsDashboardId_returnCode} -eq 0 ]; then
+            dashboardIds+=${dashboardId}
+        else
+          printf "unexpected return value (%u) by isExistsDashboardId().\n" ${isExistsDashboardId_returnCode}
+        fi
+      fi
+    done
+  fi
+
+  for dashboardId in ${dashboardIds}; do
+    dashboardName=`getNameById ${dashboardId}`
+    printf "%u,%s," ${dashboardId} ${dashboardName} | tee -a ${deleteLogFile}
+    http_response=`curl -i -s -X DELETE --url "${ac_url}dashboard/${dashboardId}" -u "${ac_user}"`
+    http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
+    if [ $http_return_code -eq 204 ]; then
+      printf "deleted\n" | tee -a ${deleteLogFile}
+    else
+      if [ $http_return_code -ge 400 ]; then
+        json_error_response=`echo $http_response | grep -E "^{" | jq -r '.errorMessages[]'`
+        printf "\"%u-%s\"\n" ${http_return_code} ${json_error_response} | tee -a ${deleteLogFile}
+      else
+        printf "\"Unexpected http_return_code (%u)\"\n" ${http_return_code}
+      fi
+    fi
+  done
+  ;;
+
+"help")
+  printf "\nHelp for %s commands:\n\n" $(basename "$0")
+  for command commandUsage in ${(kv)commandUsages}; do
+    printf ${commandUsage} ${command}
+    printf "\n"
+  done
+  printf "%s - usage examples:\n" $(basename "$0")
+  printf "\t%s json active | jq 'select(.isWritable == false)'\n" $(basename "$0")
+  printf "\t%s json | jq 'select(.id == \"10000\")'\n" $(basename "$0")
+  ;;
+
+*)
+  $(basename "$0") help
+  ;;
+esac

@@ -1,0 +1,348 @@
+#!/bin/zsh
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-project-roles/#api-group-project-roles
+# find all groups used in ProjectRoles
+# ajcProjectRoles csv projectKey | grep -v atlassian-user-role-actor | xsv table
+source ac_lib `basename $0`
+typeset -A commandUsages
+commandUsages+=([json]="%s:\t\treturns actors and their roles in json format. By default for all projects and roles.\n\t\tArguments: [-p <projectIdOrKey> n] [-r <roleId> n]\n")
+commandUsages+=([csv]="%s:\t\treturns actors and their roles in csv format. By default for all projects and roles.\n\t\tArguments: [-p <projectIdOrKey> n] [-r <roleId> n]\n")
+commandUsages+=([actor]="%s:\t\tadd/remove actor from project(s) role(s)\n\t\tArguments: (add | remove) (-u <user> | -g <group>)\n\t\t[-r <roleId> n]\n\t\t[-p <projectIdOrKey> n]\n\t\t[-s]\tsilent mode\n")
+commandUsages+=([template]="%s:\ttemplates a curl command\n\t\tArguments: none\n")
+
+typeset -a roleNames
+typeset -a roleIds
+
+function setRoleArrays() {
+  roleNames=()
+  roleIds=()
+  roles=`ajcRoles csv | tail -n +2`
+  echo ${roles} | while read line; do
+    roleIds+=`echo ${line} | awk -F ',' '{print $1}'`
+    roleNames+=`echo ${line} | awk -F ',' '{print $2}' | sed "s/\"//g"`
+  done
+  unset roles
+}
+
+function filterRoleArrays_by_option_Roles() {
+  typeset -a temp_roleIds
+  typeset -a temp_roleNames
+  for r in ${option_Roles}; do
+    if [[ ${r} =~ '^[0-9]+$' ]]; then
+      # match role by id
+      for i in {1..${#roleIds[@]}}; do
+        if [[ ${r} == ${roleIds[$i]} ]]; then
+          temp_roleIds+=${roleIds[$i]}
+          temp_roleNames+=${roleNames[$i]}
+          continue
+        fi
+      done
+    else
+      # match role by name
+      for i in {1..${#roleNames[@]}}; do
+        if [[ ${r:l} == ${roleNames[$i]:l} ]]; then
+          temp_roleIds+=${roleIds[$i]}
+          temp_roleNames+=${roleNames[$i]}
+          continue
+        fi
+      done
+    fi
+  done
+  roleNames=(${temp_roleNames})
+  roleIds=(${temp_roleIds})
+}
+
+#
+# userCommand - csv/json
+#
+if [[ ${1:l} == "csv" || ${1:l} == "json" ]]; then
+  userCommand=${1:l}
+  shift
+  typeset -a option_Projects
+  typeset -a option_Roles
+  while getopts ":p:r:" opt; do
+    case $opt in
+    p)
+      option_Projects+=$OPTARG
+      ;;
+    r)
+      option_Roles+=$OPTARG
+      ;;
+    *)
+      printf ${commandUsages[${userCommand}]} ${(k)commandUsages[${userCommand}]}
+      exit  
+      ;;
+    esac
+  done
+  shift $((OPTIND-1))
+  #
+  # csv/json - validate project
+  #
+  typeset -a projectIdOrKeys
+  if [ ${#option_Projects[@]} -gt 0 ]; then
+    for p in ${option_Projects:u}; do
+      if [ ! -z  `ajcProjects keyByProject $p key` ]; then
+        projectIdOrKeys+=${p}
+      else
+        printf "%s:\t\"%s\" projectIdOrKey not found\n" ${userCommand} ${p}
+      fi
+    done
+  else
+    projectIdOrKeys=(`ajcProjects valuesbykey key live`)
+  fi
+  #
+  # csv/json validate role
+  #
+  setRoleArrays
+  if [ ${#option_Roles[@]} -gt 0 ]; then
+    filterRoleArrays_by_option_Roles
+  fi
+  #
+  # csv/json - main loop
+  #
+  if [[ ${userCommand} == "csv" ]]; then
+    printf "project,roleId,roleName,actorName,actorType\n"
+  fi
+
+  for p in ${projectIdOrKeys}; do
+    for roleIndex in {1..${#roleIds[@]}}; do
+      if [[ ${userCommand} == "csv" ]]; then
+        curl -s -X GET --url "${ac_url}project/${p}/role/${roleIds[$roleIndex]}" -u "${ac_user}" -H "${h_a_json}" | \
+          jq -r --arg project ${p} --arg roleId ${roleIds[$roleIndex]} --arg roleName ${roleNames[$roleIndex]} '.actors[] | [$project, $roleId, $roleName, .displayName, .type] | @csv'
+      fi
+      if [[ ${userCommand} == "json" ]]; then
+        curl -s -X GET --url "${ac_url}project/${p}/role/${r}" -u "${ac_user}" -H "${h_a_json}" | jq
+      fi
+    done  
+  done
+  exit
+fi
+
+#
+# more userCommands
+#
+case ${1:l} in
+"actor")
+  userCommand=${1:l}
+  if [ -z $2 ]; then
+    printf ${commandUsages[${userCommand}]} ${(k)commandUsages[${userCommand}]}
+    exit  
+  fi 
+  shift
+  case ${1:l} in
+  "remove")
+    userAction="remove"
+    ;;
+  "add")
+    userAction="add"
+    ;;
+  *)
+    printf ${commandUsages[${userCommand}]} ${(k)commandUsages[${userCommand}]}
+    exit  
+    ;; 
+  esac
+  shift
+  typeset -a option_Projects
+  typeset -a option_Roles
+  while getopts ":u:g:r:p:s" opt; do
+    case $opt in
+    u)
+      option_ActorUser=$OPTARG
+      ;;
+    g)
+      option_ActorGroup=$OPTARG
+      ;;
+    r)
+      option_Roles+=$OPTARG
+      ;;
+    p)
+      option_Projects+=$OPTARG
+      ;;
+    s)
+      option_Silent="true"
+      ;;
+    *)
+      printf ${commandUsages[${userCommand}]} ${(k)commandUsages[${userCommand}]}
+      exit  
+      ;;
+    esac
+  done
+  shift $((OPTIND-1))
+  if [ ! -z ${option_ActorUser} ] && [ ! -z ${option_ActorGroup} ]; then
+    printf "%s:\toptions -u and -g are mutually exlusive\n" ${ac_command}
+    printf ${commandUsages[${userCommand}]} ${(k)commandUsages[${userCommand}]}
+    exit
+  fi
+  if [ -z ${option_ActorUser} ] && [ -z ${option_ActorGroup} ]; then
+    printf "%s:\tmissing actor (-u or -g)\n" ${ac_command}
+    printf ${commandUsages[${userCommand}]} ${(k)commandUsages[${userCommand}]}
+    exit
+  fi
+  #
+  # actor - validate User
+  #
+  if [ ! -z ${option_ActorUser} ]; then
+    actorName=`aacUsers getDisplayNameByAccountId ${option_ActorUser}`
+    if [ ! -z  ${actorName} ]; then
+      # accountId exists
+      actorId=${option_ActorUser}
+    else
+      # try match by name
+      actorId=`aacUsers getAccountIdByDisplayName ${option_ActorUser}`
+      if [ ! -z $actorId ] && [ $(echo $actorId | wc -l) -eq 1 ]; then
+        actorName=`aacUsers getDisplayNameByAccountId $actorId`
+      else
+        printf "%s:\t\"%s\" is not a valid user\n" ${userCommand} ${option_ActorUser}
+        exit
+      fi
+    fi
+    actor_parameter="user=${actorId}"
+    prosa_actor="user ${actorName}"
+  fi
+  #
+  # actor - validate Group
+  #
+  if [ ! -z ${option_ActorGroup} ]; then
+    actorName=`aacGroups groupNameById ${option_ActorGroup}`
+    if [ ! -z $actorName ]; then
+      actorId=${option_ActorGroup}
+    else
+      # resolve groupName
+      actorId=`aacGroups groupIdByName ${option_ActorGroup}`
+      if [ ! -z $actorId ]; then
+        actorName=${option_ActorGroup}
+      else
+        printf "%s:\t\"%s\" is not a valid group\n" ${userCommand} ${option_ActorGroup}
+        exit
+      fi
+    fi
+    actor_parameter="groupId=${actorId}"
+    prosa_actor="group ${actorName}"
+  fi
+  #
+  # actor - validate Role(s)
+  #
+  setRoleArrays
+  if [ ${#option_Roles[@]} -gt 0 ]; then
+    filterRoleArrays_by_option_Roles
+  fi
+  #
+  # actor - validate Project(s)
+  #
+  typeset -a projectIdOrKeys
+  if [ ${#option_Projects[@]} -gt 0 ]; then
+    for p in ${option_Projects:u}; do
+      if [ ! -z  `ajcProjects keyByProject $p key` ]; then
+        projectIdOrKeys+=${p}
+      else
+        printf "%s:\t\"%s\" projectIdOrKey not found\n" ${userCommand} ${p}
+      fi
+    done
+  else
+    projectIdOrKeys=(`ajcProjects valuesbykey key live`)
+  fi
+  #
+  # request user confirmation
+  #
+  if [ ! -v option_Silent ]; then
+    printf "%s role"  ${userAction}
+    if [ ${#option_Roles[@]} -gt 1 ]; then
+      printf "s:[%s] " "${roleNames[*]}"
+    else
+      printf " %s " "${roleNames[1]}"
+    fi
+    case $userAction in
+    "remove")
+      printf "from "
+      ;;
+    "add")
+      printf "to "
+      ;; 
+    esac
+    printf "%s for project" $prosa_actor
+    if [ ${#projectIdOrKeys[@]} -gt 1 ]; then
+      printf "s:[%s]" "${projectIdOrKeys[*]}"
+    else
+      printf " %s" "${projectIdOrKeys[1]}"
+    fi
+    printf ".\n"
+    vared -p "Let's do it, yes? " -c YesNo
+    if [[ ${YesNo} != [Yy]* ]]; then
+      printf "All good, nothing happened.\n"
+      exit
+    fi
+    # CSV Header Row
+    printf "actorId,actorName,role,project,result\n" | tee -a ${LogFile}
+  fi
+  # actor - main
+  typeset -r LogFile="${ac_command}_${userCommand}_log_${timestampDateOnly}T${timestampTimeOnly}.csv"
+  for projectIdOrKey in ${projectIdOrKeys}; do
+    for roleIndex in {1..${#roleIds[@]}}; do
+      printf "%s,%s,%s,%s," ${actorId} ${actorName} ${roleNames[$roleIndex]} ${projectIdOrKey}  | tee -a ${LogFile}
+      case ${userAction} in
+      "remove")  
+        # https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-project-role-actors/#api-rest-api-3-project-projectidorkey-role-id-delete
+        http_response=`curl -i -s -X DELETE --url "${ac_url}project/${projectIdOrKey}/role/${roleIds[$roleIndex]}?${actor_parameter}" -u "${ac_user}"`
+        ;;
+      "add")
+        # https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-project-role-actors/#api-rest-api-3-project-projectidorkey-role-id-put
+        if [ ! -z ${option_ActorGroup} ]; then
+          group_already_assigned=`curl -s -X GET --url "${ac_url}project/${projectIdOrKey}/role/${roleIds[$roleIndex]}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.actors[] | select (.type == "atlassian-group-role-actor").actorGroup.groupId'`
+          if [[ ${group_already_assigned[*]} =~ "${actorId}" ]]; then
+            printf "existed\n" | tee -a ${LogFile}
+            continue
+          else
+            http_response=`curl -i -s -X POST --url "${ac_url}project/${projectIdOrKey}/role/${roleIds[$roleIndex]}" -u "${ac_user}" -H "${h_a_json}" -H "${h_ct_json}" --data "$(jq -n --arg id "${actorId}" '{"groupId": [ $id ]}')"`
+          fi
+        fi
+        if [ ! -z ${option_ActorUser} ]; then
+          user_already_assigned=`curl -s -X GET --url "${ac_url}project/${projectIdOrKey}/role/${roleIds[$roleIndex]}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.actors[] | select (.type == "atlassian-user-role-actor").actorUser.accountId'`
+          if [[ ${user_already_assigned[*]} =~ "${actorId}" ]]; then
+            printf "existed\n" | tee -a ${LogFile}
+            continue
+          else
+            http_response=`curl -i -s -X POST --url "${ac_url}project/${projectIdOrKey}/role/${roleIds[$roleIndex]}" -u "${ac_user}" -H "${h_a_json}" -H "${h_ct_json}" --data "$(jq -n --arg id "${actorId}" '{"user": [ $id ]}')"`
+          fi
+        fi
+        ;;
+      esac
+      http_return_code=`echo ${http_response} | grep "^HTTP" | awk '{print $2}'`
+      json_error_response=`echo ${http_response} | grep -E "{"`
+      case ${userAction} in
+      "remove")
+        if [ ${http_return_code} -eq 204 ]; then
+          if [[ ${userAction} == "remove" ]]; then
+            printf "removed\n" | tee -a ${LogFile}
+          fi
+        else
+          printf "%u-%s\n" ${http_return_code} ${json_error_response} | tee -a ${LogFile}
+        fi
+        ;;
+      "add")
+        if [ $http_return_code -eq 200 ]; then
+          printf "added\n" | tee -a ${LogFile}
+        else
+          printf "%u-%s\n" ${http_return_code} ${json_error_response} | tee -a ${LogFile}
+        fi
+        ;;
+      esac
+    done
+  done
+  ;;
+
+"template")
+  printf "curl -s -X GET --url \"%sproject/<PROJECTKEY>/role/<ROLEID>\" -u \"%s\" -H \"%s\"\n" ${ac_url} ${ac_user} ${h_a_json}
+  ;;
+
+"help")
+  printf "\nHelp for %s commands:\n\n" $(basename "$0")
+  for command commandUsage in ${(kv)commandUsages}; do
+    printf ${commandUsage} ${command}
+    printf "\n"
+  done
+  #printf "%s - usage examples:\n" ${ac_command}
+  ;;
+
+*)
+  ${ac_command} help
+  ;;
+esac

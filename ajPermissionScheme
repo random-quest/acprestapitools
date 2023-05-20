@@ -1,0 +1,229 @@
+#!/bin/zsh
+# find PS where holder is a group
+# ajcPS json | jq -r '.permissionSchemes[] | select(.permissions[].holder.type == "group") | "\(.id),\(.name)"' | sort
+# ajcPS json 10041 | jq '.permissions[] | select(.holder.type == "group")'
+source ac_lib `basename $0`
+declare -a available_keywords=("count" "get" "json" "csv" "getPermissionGrants" "createPermissionGrantForAccountId" "deletePermissionGrantForAccountId" "delete")
+if [[ -z $1 ]]; then; user_keyword="hugo"; else; user_keyword=$1; fi
+if ! is_keyword_valid ${user_keyword} ${available_keywords[@]}; then; exit 0; fi
+
+typeset builtInPermissions
+builtInPermissions=("ADMINISTER_PROJECTS" "BROWSE_PROJECTS")
+
+getElement()
+{
+  typeset jsonElement="id"
+  if [ ! -z $2 ]; then
+    jsonElement=$2
+  fi
+  if [[ $1 == "X" ]]; then
+    curl -s -X GET --url "${ac_url}permissionscheme" --user "${ac_user}" -H "${h_a_json}" | jq -r --arg e $jsonElement '.permissionSchemes[][$e]' | sort
+  else
+    curl -s -X GET --url "${ac_url}permissionscheme/$1" -u "${ac_user}" -H "${h_a_json}" | jq -r --arg e $jsonElement '.[$e]'
+  fi
+}
+
+getPermissionGrants()
+{
+  integer -r permissionSchemeId=$1
+  getPermissionGrants_JSON=`curl -s -X GET --url "${ac_url}permissionscheme/${permissionSchemeId}/permission" -u "${ac_user}" -H "${h_a_json}"`
+  if [ ! -z $2 ]; then
+    jsonElement=$2
+    echo ${getPermissionGrants_JSON} | jq -r --arg e $jsonElement '.permissions[] | select (.holder.type != "applicationRole")[$e]'
+  else 
+    echo ${getPermissionGrants_JSON} | jq -r --arg permissionSchemeId $permissionSchemeId '.permissions[] | select (.holder.type != "applicationRole") | [ $permissionSchemeId, .id, .permission, .holder.type, .holder.parameter, .holder.value ] | @csv'
+  fi  
+}
+
+case $1 in
+"count")
+  curl -s -X GET --url "${ac_url}permissionscheme" --user "${ac_user}" -H "${h_a_json}" | jq -r '.permissionSchemes | length' 
+  ;;
+
+"get")
+  if [ -z $2 ]; then
+    print_command_usage $1 "(<permissionSchemeId> | X) (id | name | description | self)"
+    exit
+  fi
+  getElement ${2:u} $3
+  ;;
+
+"json")
+  if [ -z $2 ]; then
+    print_command_usage $1 "(<permissionSchemeId> | X)"
+    exit
+  fi
+  if [[ ${2:u} == "X" ]]; then
+    curl -s -X GET --url "${ac_url}permissionscheme" -u "${ac_user}" -H "${h_a_json}" | jq
+  else
+    integer permissionSchemeId=$2
+    curl -s -X GET --url "${ac_url}permissionscheme/${permissionSchemeId}" -u "${ac_user}" -H "${h_a_json}" | jq  
+  fi
+  ;;
+
+"csv")
+  printf "id,name,description\n"
+  curl -s -X GET --url "${ac_url}permissionscheme" -u "${ac_user}" -H "${h_a_json}" | jq -r '.permissionSchemes | map([.id, .name, .description] | join (",")) | join("\n")'
+  ;;
+
+"getPermissionGrants")
+  if [ -z $2 ]; then
+     print_command_usage $1 "(<permissionSchemeId> | X) [element]"
+    exit
+  fi
+  typeset -a permissionSchemeIds
+  if [[ ${2} == "X" ]]; then
+    permissionSchemeIds=(`getElement X id`)
+  else
+    permissionSchemeIds=$2
+  fi
+  printf "PermissionSchemeId,PermissionGrantId,permission,holderType,holderParameter,holderValue\n"
+  for permissionSchemeId in ${permissionSchemeIds}; do
+    getPermissionGrants ${permissionSchemeId}
+  done
+  ;;
+
+"createPermissionGrantForAccountId")
+  if [ -z $2 ] || [ -z $3 ] || [ -z $4 ]; then
+    print_command_usage $1 "(<accountid> <displayName>) (<permissionSchemeId> | X) <permission>"
+    exit
+  fi
+  # verify accountId
+  if [ ! $(aacUsers get accountId | grep -E "^${2}$") ]; then
+    # resolve accountId from displayName
+    typeset accountId=`aacUsers getAccountIdByDisplayName $2`
+    if [ ! -z $accountId ] && [ $(echo $accountId | wc -l) -eq 1 ]; then
+      true
+    else
+      printf "%s not found\n" $2
+      exit 2
+    fi
+  else
+    # take accountId as is
+    accountId=$2
+  fi
+  # verify permissionSchemeId
+  typeset -a permissionSchemeIds
+  if [[ ${3} == "X" ]]; then
+    permissionSchemeIds=(`getElement X id`)
+  else
+    if [[ $(getElement ${3} id) == null ]]; then
+      printf "%s not found\n" $3
+      exit
+    else
+      permissionSchemeIds=$3
+    fi
+  fi
+  # verify permission
+  for builtInPermission in ${builtInPermissions}; do
+    if [[ ${builtInPermission} == ${4:u} ]]; then
+      typeset -r permission=${4:u}
+      continue
+    fi
+  done
+  if [ -z ${permission} ]; then
+    echo "available permissions: ${builtInPermissions[*]}"
+    exit
+  fi
+  printf "permissionSchemeId,accountId,permission,requestResponse\n"
+  for permissionSchemeId in ${permissionSchemeIds}; do
+    printf "%u,%s,%s," ${permissionSchemeId} ${accountId} ${permission}
+    http_response=`curl -i -s -X POST --url "${ac_url}permissionscheme/${permissionSchemeId}/permission" -u "${ac_user}" -H "${h_a_json}" -H "${h_ct_json}" --data "$(jq -n --arg accountId ${accountId} --arg permission ${permission} '{"holder": { "type": "user", "parameter": $accountId }, "permission": $permission}')"`
+    http_return_code=`echo $http_response | grep "^HTTP" | awk '{print $2}'`
+    http_json_response=`echo $http_response | grep "^{"`
+    if [ 201 -eq ${http_return_code} ]; then
+      printf "success\n"
+    fi
+    if [ $http_return_code -ge 400 ]; then
+      errorMessage=`echo $http_json_response | jq -r '.errorMessages[]'`
+      printf "%u-%s\n" ${http_return_code} ${errorMessage}
+    fi
+  done
+  ;;
+
+"deletePermissionGrantForAccountId")
+  if [ -z $2 ] || [ -z $3 ] | [ -z $4 ]; then
+    print_command_usage $1 "(<accountid> | <displayName>) (<permissionSchemeId> | X) (<permission> | X) [COMMIT]"
+    exit
+  fi
+  # verify accountId | 
+  if [ ! $(aacUsers get accountId | grep -E "^${2}$") ]; then
+    # resolve accountId from displayName
+    typeset accountId=`aacUsers getAccountIdByDisplayName $2`
+    if [ ! -z $accountId ] && [ $(echo $accountId | wc -l) -eq 1 ]; then
+      true
+    else
+      printf "%s not found\n" $2
+      exit 2
+    fi
+  else
+    # take accountId as is
+    accountId=$2
+  fi
+  typeset -a permissionSchemeIds
+  if [[ ${3:u} == "X" ]]; then
+    permissionSchemeIds=(`getElement X id`)
+  else
+    permissionSchemeIds=$3
+  fi
+  permission=${4:u}
+  if [ ! -z $5 ] && [[ ${5:u} == "COMMIT" ]]; then
+    typeset -r COMMIT="Yes"
+  else
+    typeset -r COMMIT="No"
+  fi
+  printf "PermissionSchemeId,PermissionGrantId,permission,holderType,holderParameter,holderValue,requestResponse\n"
+  for permissionSchemeId in ${permissionSchemeIds}; do
+    filteredPermissionGrants=`getPermissionGrants $permissionSchemeId | grep $accountId`
+    if [[ ${permission} != "X" ]]; then
+      filteredPermissionGrants=`echo $filteredPermissionGrants | grep $permission`
+    fi
+    if [ ! -z ${filteredPermissionGrants} ]; then 
+      echo ${filteredPermissionGrants} | while read filteredPermissionGrant; do
+        permissionId=`echo ${filteredPermissionGrant} | awk -F ',' '{print $2}'`
+        echo -n ${filteredPermissionGrant}
+        if [[ $COMMIT == "Yes" ]]; then
+          http_response=`curl -i -s -X DELETE --url "${ac_url}permissionscheme/${permissionSchemeId}/permission/${permissionId}" -u "${ac_user}"`
+          http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
+          http_json_string=$(echo $http_response | grep "^{")
+          if [ 204 -eq ${http_return_code} ]; then
+            printf ",success\n"
+          else
+            printf "%u-" ${http_return_code}
+            echo $http_json_string | jq -r '.errorMessages[]'
+          fi
+        else
+          printf ",displayOnly\n"
+        fi
+      done
+    fi
+  done
+  ;;
+
+"delete")
+  typeset -r deleteLogFile="ajcPS_DeleteLog_${timestampDateOnly}T${timestampTimeOnly}.csv"
+  if [ -z $2 ]; then
+    print_command_usage $1 "(permissionSchemeId | X)"
+    exit
+  fi
+  typeset -a permissionSchemeIds
+  if [[ ${2:u} == "X" ]]; then
+    permissionSchemeIds=(`getElement X id`)
+  else
+    permissionSchemeIds=$2
+  fi
+  for permissionSchemeId in ${permissionSchemeIds}; do
+    printf "%s," ${permissionSchemeId} | tee -a ${deleteLogFile}
+    http_response=`curl -i -s -X DELETE --url "${ac_url}permissionscheme/${permissionSchemeId}" -u "${ac_user}"`
+    http_return_code=`echo $http_response | grep "^HTTP" | awk '{print $2}'`
+    http_json_string=`echo $http_response | grep "^{"`
+    if [ 204 -eq ${http_return_code} ]; then
+      printf "deleted\n" | tee -a ${deleteLogFile}
+    else
+      json_error_response=`echo $http_response | grep -E "{\"errorMessages" | jq -r '.errorMessages[]'`
+      printf "%u-%s\n" ${http_return_code} ${json_error_response} | tee -a ${deleteLogFile}
+    fi
+  done
+  ;;
+
+esac

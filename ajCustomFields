@@ -1,0 +1,315 @@
+#!/bin/zsh
+source ac_lib `basename $0`
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-fields/#api-rest-api-3-field-search-get
+# Fields that depend on global Jira settings are only returned if the setting is enabled. That is, timetracking fields, subtasks, votes, and watches.
+typeset -r expandParam="key,lastUsed,screensCount,contextsCount,isLocked,searcherKey"
+typeset -Ar Array_customFieldTypes=([custom]="custom" [system]="system")
+typeset -A Array_keys_available
+integer -r maxResults=50
+integer recordCount
+integer numPages
+typeset -r Logfile_AsyncTasks="${ac_command}_Async_TaskIds.csv"
+
+function load_keys_available() {
+  Array_keys_available=(`curl -s -X GET --url "${ac_url}field/search?type=custom&expand=${expandParam}" -u "${ac_user}" -H  "${h_a_json}" | jq -r '.values[0] | keys_unsorted | reduce .[] as $key (" "; . + $key + " " + $key + " ")'`)
+  String_keys_available=$(printf "(%s)" ${(kj: | :)Array_keys_available}) 
+}
+load_keys_available
+
+typeset -A commandUsages
+commandUsages=([count]="%s:\t\tcounts the number of custom fields.\n\t\targuments: [(custom | system)] default is custom\n")
+commandUsages+=([json]="%s:\t\tjson format.\n\t\targuments: (custom | system)\n")
+commandUsages+=([csv]="%s:\t\tcsv format.\n\t\targuments: (custom | system)\n\t\t[-s]\tsuppress header\n")
+commandUsages+=([valuesbykey]="%s:\tretrieves values for keys(s).\n\t\targuments: (custom | system) -k <key> -i <id>\n\t\t-k key you want to see\n\t\t-i field Id or \"*\"\n\t\tavailable keys: ${String_keys_available}\n")
+commandUsages+=([delete]="%s:\t\tdelete custom field(s)\n\t\targuments: -i <Id> n [-s] | -t <Id> n\n\t\t-i\tcustom field Id or \"*\"\n\t\t-t\tasync task completion status or \"*\"\n\t\t[-s]\tsilent mode\n")
+
+function count() {
+  # del(.description), because it could contain newlines that mess up the JSON format
+  if [ ! -z $1 ]; then
+    recordCount=`curl -s -X GET --url "${ac_url}field/search?type=$1&maxResults=1" -u "${ac_user}" -H "${h_a_json}" | jq 'del(.values[].description) | .total'`
+    numPages=${recordCount}/${maxResults}
+  else
+    printf "count() needs \"type\" parameter\n"
+  fi
+}
+
+function getAllValuesForKey() {
+  if [ ! -z $1 -a ! -z $2 ]; then
+    count $1
+    integer local_startIndex
+    integer local_pageCounter
+    for local_pageCounter in {0..$numPages}; do
+      local_startIndex=${local_pageCounter}*${maxResults}
+      curl -s -X GET --url "${ac_url}field/search?type=${1}&expand=${expandParam}&startAt=${local_startIndex}&maxResults=${maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r --arg key $2 '.values[][$key]' | sort
+    done
+  else
+    printf "getAllValuesForKey() needs parameters \$1=customField_Type \$2=option_Keys[1].\n"
+  fi
+}
+
+if [[ ${1:l} == "csv" || ${1:l} == "json" || ${1:l} == "count" ]]; then
+  typeset subCommand=${1:l}
+  if [ ! -z $1 -a ! -z $2 ]; then
+    typeset customField_Type=${(k)Array_customFieldTypes[${2:l}]-"custom"}
+    shift 2
+    count $customField_Type
+    if [[ $subCommand == "count" ]]; then
+      printf "%u\n" ${recordCount}
+      exit
+    fi
+    while getopts ":s" opt; do
+      case $opt in
+      s)
+        option_Silent="true"
+        ;;
+      esac
+    done
+    if [[ ! -v option_Silent && $subCommand == "csv" ]]; then 
+      printf "id,name,schemaType,isLocked,screensCount,contextsCount\n"
+    fi
+    integer startIndex
+    for page in {0..$numPages}; do
+      startIndex=${page}*${maxResults}
+      case $subCommand in
+        "csv")
+          curl -s -X GET --url "${ac_url}field/search?type=${customField_Type}&orderBy=name&expand=${expandParam}&startAt=${startIndex}&maxResults=${maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[] | [ .id, .name, .schema.type, .isLocked, .screensCount, .contextsCount] | @csv'
+          ;;
+        "json")
+          curl -s -X GET --url "${ac_url}field/search?type=${customField_Type}&expand=${expandParam}&startAt=${startIndex}&maxResults=${maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq '.values[]'
+          ;;
+        esac
+    done
+  else
+    printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+  fi
+  exit
+fi
+
+case ${1:l} in
+"valuesbykey")
+  typeset subCommand=${1:l}
+  if [ ! -z $1 -a ! -z $2 ]; then  
+    typeset customField_Type=${Array_customFieldTypes[${2:l}]-"custom"}
+    shift 2
+    typeset -a option_IDs
+    typeset -a option_Keys
+    while getopts ":i:k:v" opt; do
+      case $opt in
+      i)
+        option_IDs+=$OPTARG
+        ;;
+      k)
+        if [ ! -z ${(k)Array_keys_available[${OPTARG}]} ]; then
+          option_Keys+=${(k)Array_keys_available[${OPTARG}]}
+        fi
+        ;;
+      v)
+        option_Verbose="true"
+        ;;
+      *)
+        printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+        exit  
+        ;;
+      esac
+    done
+    shift $((OPTIND-1))
+    #
+    # validate user options
+    #
+    if [ ${#option_Keys[@]} -eq 0 -o ${#option_IDs[@]} -eq 0 ]; then
+      # these user options are mandatory
+      printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+      exit  
+    fi
+    if [[ $option_IDs[1] == "*" ]]; then
+      option_IDs=(`getAllValuesForKey $customField_Type "id"`)
+    fi
+    # 
+    # main
+    #
+    for Id in ${option_IDs}; do
+      curl_command="curl -i -s -X GET --url \"${ac_url}field/search?id=${Id}&maxResults=1&type=${customField_Type}&expand=${expandParam}\" -u $ac_user -H $h_a_json"
+      if [ -v option_Verbose ]; then
+        echo $curl_command
+      fi
+      http_response=`eval ${curl_command}`
+      http_return_code=`echo $http_response | grep "^HTTP" | awk '{print $2}'`
+      http_json_string=`echo $http_response | sed -ne '/^{/,$ p' | tr -d '\n' | tr -d '\r' | tr -d '\t'`
+      if [ $http_return_code -eq 200 ]; then
+        if [[ `echo $http_json_string | jq -r '.values[].id'` != $Id ]]; then
+          continue;
+        fi
+        typeset -a temp_array_jsonValues
+        for key in ${option_Keys}; do
+          temp_array_jsonValues+=`echo $http_json_string | jq -r --arg key ${key} '.values[][$key]'`
+        done
+        echo ${(j:,:)temp_array_jsonValues}
+        unset temp_array_jsonValues
+      else
+        printf "%u,%s\n" $http_return_code `echo $http_json_string | jq -r --arg key ${key} '.errorMessages[]'`
+      fi
+    done
+  else
+    printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+  fi
+  ;;
+
+"delete")
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-fields/#api-rest-api-3-field-id-delete
+  subCommand=${1:l}
+  shift
+  typeset -a option_AysncTask_Ids
+  while getopts ":i:t:sv" opt; do
+    case $opt in
+    i)
+      if [ ! -v Array_Id_Name ]; then
+        # initialize only once, when needed
+        typeset -A Array_Id_Name=(`ajcCustomFields csv custom -s | sed "s/[\"'<>()&/]//g" | sed "s/ /_/g" | awk -F ',' '{print $1 " " $2}'`)
+        typeset -A option_Array_Id_Name
+      fi
+      if [ ! -z ${Array_Id_Name[$OPTARG]} ]; then
+        option_Array_Id_Name+=([$OPTARG]=${(v)Array_Id_Name[$OPTARG]})
+      else
+        if [[ $OPTARG == "*" &&  ${#option_Array_Id_Name[@]} -eq 1 ]]; then
+          # allow "*" for first ID option
+          option_Array_Id_Name=(["*"]="wild card")
+        else
+          printf "%s:\tid %s not valid\n" ${subCommand} $OPTARG
+          exit
+        fi
+      fi
+      ;;
+    t)
+      option_AysncTask_Ids+=$OPTARG
+      ;;
+    s)
+      option_Silent="true"
+      ;;
+    v)
+      option_Verbose="true"
+      ;;
+    *)
+      printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+      exit
+      ;;
+    esac
+  done
+  shift $((OPTIND-1))
+  #
+  # validate user options
+  #
+  if [ ! -v option_DeleteAll -a ${#option_AysncTask_Ids[@]} -eq 0 -a ${#option_Array_Id_Name[@]} -eq 0 ]; then
+    # remind user of usage because -> no option
+    printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+    exit
+  fi    
+  if [ ${#option_AysncTask_Ids[@]} -gt 0 ]; then
+    # -t option
+    if [ -f ${Logfile_AsyncTasks} ]; then
+      if [[ $option_AysncTask_Ids[1] == "*" ]]; then
+        printf "\"%s\" contains %u entrie(s):\n" ${Logfile_AsyncTasks} `cat ${Logfile_AsyncTasks} | wc -l`
+        cat ${Logfile_AsyncTasks} | while read line; do
+          async_task_url=`echo ${line} | awk  -F ',' '{print $3}'`
+          printf "%s,%u\n" `echo ${line} | awk  -F ',' '{print $1}'` `curl -s ${async_task_url} -u "${ac_user}" | jq -r '.progress'`
+        done
+      else
+        for Id in $option_AysncTask_Ids; do
+          async_task_url=`grep -E "^${Id}" ${Logfile_AsyncTasks} | awk -F ',' '{print $3}'`
+          if [ -z ${async_task_url} ]; then
+            printf "Id \"%s\" not found in file \"%s\".\n" ${2:u} ${Logfile_AsyncTasks}
+          else
+            printf "%s,%u\n" ${Id} `curl -s ${async_task_url} -u "${ac_user}" | jq -r '.progress'`
+          fi
+        done
+      fi
+    else
+      printf "No file \"%s\".\n" ${Logfile_AsyncTasks}
+    fi
+    exit
+  fi
+  if [[ ${(v)option_Array_Id_Name[1]} == "wild card" ]]; then
+    # apply wild card for option_Array_Id_Name
+    option_Array_Id_Name=(`ajcCustomFields csv custom -s | sed "s/[\"'<>()&/]//g" | sed "s/ /_/g" | awk -F ',' '{print $1 " " $2}'`)
+  fi
+  #
+  # request user confirmation
+  #
+  if [ ! -v option_Silent ]; then
+    printf "delete %u custom field" ${#option_Array_Id_Name[@]}
+    if [ ${#option_Array_Id_Name[@]} -gt 1 ]; then
+      printf "s"
+    fi
+    printf ":[\n"; 
+    for Id Name in ${(kv)option_Array_Id_Name}; do
+      printf "%-25s,%-50s\n" $Id $Name
+    done
+    printf "]\n"
+    vared -p "Let's do it, yes? " -c YesNo
+    if [[ ${YesNo} != [Yy]* ]]; then
+      printf "All good, nothing happened.\n"
+      exit
+    fi
+  fi
+  #
+  # rotate Logfile_AsyncTasks?
+  #
+  if [ -f ${Logfile_AsyncTasks} ]; then
+    integer records_in_logfileForTasks=`cat ${Logfile_AsyncTasks} | wc -l`
+    vared -p "${records_in_logfileForTasks} tasks in \"${Logfile_AsyncTasks}\" file. Rotate, yes? " -c YesNo_logfileForTasks
+    if [[ ${YesNo_logfileForTasks} == [Yy]* ]]; then 
+      mv ${Logfile_AsyncTasks} ${Logfile_AsyncTasks}_${date_time_stamp}.csv
+    fi  
+  fi
+  #
+  # main loop
+  #
+  if [ ! -v option_Silent ]; then
+    printf "id,name,result\n"
+  fi
+  typeset -r LogFile="${ac_command}_${subCommand}_log_${date_time_stamp}.tsv"
+  for Id Name in ${(kv)option_Array_Id_Name}; do
+    curl_command="curl -i -s -X DELETE --url \"${ac_url}field/${Id}\" -u ${ac_user}"
+    if [ -v option_Verbose ]; then
+      echo $curl_command
+    fi
+    http_response=`eval ${curl_command}`
+    http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
+    async_task_url=$(echo $http_response | grep "^location" | awk '{print $2}' | sed "s/\r//")
+    json_error_response=`echo $http_response | grep "^{" | jq -r '.errorMessages[]'`
+    printf "%s,%s," $Id $Name | tee -a ${LogFile}
+    if [ $http_return_code -eq 303 ]; then
+      async_task_progress=`curl -s $async_task_url -u "$ac_user" | jq -r '.progress'  | tee -a $LogFile`
+      printf "%u\n" $async_task_progress
+      if [[ ${async_task_progress} != "100" ]]; then
+        printf "%s,%s,%s\n" $Id $Name $async_task_url >> $Logfile_AsyncTasks
+      fi
+    fi
+    if [ $http_return_code -ge 400 ]; then
+      printf "\"%u-%s\"\n" $http_return_code ${json_error_response} | tee -a $LogFile
+    fi
+  done
+  ;;
+
+"help")
+  printf "\nHelp for %s commands:\n\n" $(basename "$0")
+  for command commandUsage in ${(kv)commandUsages}; do
+    printf ${commandUsage} ${command}
+    printf "\n"
+  done
+  printf "%s - usage examples:\n\n" $(basename "$0")
+  printf "  o) find duplicate custom fields\n"
+  printf "\t%s csv custom | xsv select name | sort | uniq -c | grep -v \"1 \"\n" $ac_command
+  printf "  o) find custom fields where screensCount > 0\n"
+  printf "\t%s csv custom | xsv search -v -s screensCount \"^0$\" | xsv table\n" $ac_command
+  printf "  o) find custom fields where screensCount is 0\n"
+  printf "\t%s csv custom | xsv search -s screensCount \"^0$\" | xsv table\n" $ac_command
+  printf "  o) find custom fields where contextsCount > 1\n"
+  printf "\t%s csv custom | xsv search -v -s contextsCount \"^0$|^1$\" | xsv table\n" $ac_command
+  printf "  o) find custom fields where screensCount > 12 and <= 15\n"
+  printf "\t%s json custom | jq -r 'select(.screensCount > 12 and .screensCount <= 15) | [.id, .name, .screensCount ] | @csv'\n" $ac_command
+  ;;
+
+*)
+  $(basename "$0") help
+  ;;
+esac

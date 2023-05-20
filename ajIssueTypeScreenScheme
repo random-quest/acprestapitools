@@ -1,0 +1,51 @@
+#!/bin/zsh
+source ac_lib `basename $0`
+declare -a available_keywords=("count" "getids" "csv" "delete")
+if [[ -z $1 ]]; then; user_keyword="hugo"; else; user_keyword=$1; fi
+if ! is_keyword_valid ${user_keyword} ${available_keywords[@]}; then; exit 0; fi
+
+getids()
+{
+curl -s -X GET --url "${ac_url}issuetypescreenscheme?startAt=0&maxResults=100" -u "${ac_user}" --header "${h_a_json}" | jq -r '.values[] | select(.id|tonumber != 1).id'
+}
+
+case $1 in
+"count")
+  getids | wc -l
+  ;;
+"getids")
+  getids
+  ;;
+"csv")
+  printf "id,name,description\n"
+  curl -s -X GET --url "${ac_url}issuetypescreenscheme?startAt=0&maxResults=100" -u "${ac_user}" --header "${h_a_json}" | jq -r '.values[] | [ .id, .name, .description ] | @csv'
+  ;;
+"delete")
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-type-screen-schemes/#api-rest-api-3-issuetypescreenscheme-issuetypescreenschemeid-delete
+  typeset -r deleteLogFile="ajcITSS_DeleteLog_${timestampDateOnly}T${timestampTimeOnly}.csv"
+  if [ -z $2 ]; then
+    print_command_usage $1 "(issueTypeScreenSchemeId | X)"
+    exit
+  fi
+  typeset -a issueTypeScreenSchemeIds
+  if [[ ${2:u} == "X" ]]; then
+    issueTypeScreenSchemeIds=(`getids`)
+  else
+    issueTypeScreenSchemeIds=$2
+  fi
+  for issueTypeScreenSchemeId in ${issueTypeScreenSchemeIds}; do
+    printf "%u," ${issueTypeScreenSchemeId} | tee -a ${deleteLogFile}
+    http_response=`curl -i -s -X DELETE --url "${ac_url}issuetypescreenscheme/${issueTypeScreenSchemeId}" -u "${ac_user}"` 
+    http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
+    if [ $http_return_code -eq 204 ]; then
+      printf "deleted\n" | tee -a ${deleteLogFile}
+      continue
+    fi
+    if [ $http_return_code -ge 400 ]; then
+      json_error_response=`echo $http_response | grep -E "{\"errorMessage"`
+      printf "%u-%s\n" $http_return_code ${json_error_response} | tee -a ${deleteLogFile}
+      continue
+    fi
+  done
+  ;;
+esac

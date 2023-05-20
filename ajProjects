@@ -1,0 +1,556 @@
+#!/bin/zsh
+# based on https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-projects/#api-group-projects
+source ac_lib `basename $0`
+integer -r maxResults=50
+integer recordCount
+integer numPages
+function getAvailableKeys() {
+  typeset local_availableKeysArray=(`curl -s -X GET --url "${ac_url}project/search?status=active&expand=${expandParam}" -u "${ac_user}" -H  "${h_a_json}" | jq -r '.values[0] | keys_unsorted | .[]'`)
+  stringOfAvailableKeys=$(printf "(%s)" ${(j: | :)local_availableKeysArray})
+}
+getAvailableKeys
+
+typeset -A commandUsages
+commandUsages=([count]="%s:\t\tcounts the number of projects.\n\t\tArguments: (live | archived | deleted | all)\n")
+commandUsages+=([countissues]="%s:\tcounts the number of issues.\n\t\tArguments: [-c] [-a] [projectKey]\n\t\t-c\tDisplay a grand total.\n\t\t-a\tCount issues for all projects.\n")
+commandUsages+=([valuesbykey]="%s:\tretrieves values for a key.\n\t\tArguments: (id | key | name | self) (live | archived | deleted | all)\n")
+commandUsages+=([json]="%s:\t\texports all live projects in json format.\n\t\tArguments: none\n")
+commandUsages+=([csv]="%s:\t\texports all live projects in csv format.\n\t\tArguments: none\n")
+commandUsages+=([keybyproject]="%s:\tretrieves a JSON-Key for the given projectIdOrKey. Also, lists keys with -k\n\t\tArguments: (-k <projectIdOrKey> | <projectIdOrKey> <JSON-Key>)\n\t\tOptions: -k list keys of JSON-object\n")
+commandUsages+=([archive]="%s:\tarchives project(s).\n\t\tArguments: <projectIdOrKey> [<projectIdOrKey> n]\n")
+commandUsages+=([restore]="%s:\trestores project(s) from archived and deleted state.\n\t\tArguments: <projectIdOrKey> [<projectIdOrKey> n]\n")
+commandUsages+=([delete]="%s:\t\tdeletes project(s).\n\t\tArguments: ([-i] | (-a | <projectIdOrKey> [<projectIdOrKey> n]))\n\t\t-a\tDeletes all projects.\n\t\t-i\tGives information on the progress of asynchronous deletion.\n")
+commandUsages+=([listkeys]="%s:\tlists the json object keys (root keys only).\n\t\tArguments: none\n")
+commandUsages+=([features]="%s:\tlists the features of a project.\n\t\tArguments: (-a | <projectIdOrKey> [<projectIdOrKey> n])\n\t\tOptions:\n\t\t-a all projects\n\t\t-j output in JSON format\n")
+
+typeset result_getKeyByProjectKeyOrId
+
+typeset -r logfileForTasks="ajcProjects_DeletionTaskIds.csv"
+
+function getValuesByKey() {
+  if [ ! -z $1 ] && [ ! -z $2 ]; then
+    typeset local_queryParameterStatus
+    case $2 in
+    "live")
+      local_queryParameterStatus="status=live"
+      ;;
+    "archived")
+      local_queryParameterStatus="status=archived"
+      ;;
+    "deleted")
+      local_queryParameterStatus="status=deleted"
+      ;;
+    "all")
+      local_queryParameterStatus="status=live&status=archived&status=deleted"
+      ;;
+    *)
+      printf "count() not valid \"status\" parameter\n"
+      ;;
+    esac
+    count $2
+    integer local_startIndex
+    integer local_pageCounter
+    for local_pageCounter in {0..$numPages}; do
+      local_startIndex=${local_pageCounter}*${maxResults}
+      curl -s -X GET --url "${ac_url}project/search?startAt=${local_startIndex}&maxResults=${maxResults}&${local_queryParameterStatus}" -u "${ac_user}" -H "${h_a_json}" | jq -r --arg key $1 '.values[][$key]' | sort
+    done
+  else
+    if [ -z $1 ]; then
+      printf "count() needs the \"key\" parameter\n"
+    fi
+    if [ -z $2 ]; then
+      printf "count() needs the \"status\" parameter\n"
+    fi
+  fi
+}
+
+function getKeyByProjectKeyOrId() {
+  # https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-projects/#api-rest-api-3-project-projectidorkey-get
+  if [ ! -z $1 ] && [ ! -z $2 ]; then
+    result_getKeyByProjectKeyOrId=`curl -s -X GET --url "${ac_url}project/${1:u}" -u "${ac_user}" -H "${h_a_json}" | jq -r --arg key $2 '.[$key]'`
+  else
+    prinf "getKeyByKeyOrId() needs the two parameters: $1 projectKeyOrId $2 JSON-Key\n"
+  fi
+}
+
+function count() {
+  if [ ! -z $1 ]; then
+    typeset local_queryParameterStatus
+    case $1 in
+    "live")
+      local_queryParameterStatus="status=live"
+      ;;
+    "archived")
+      local_queryParameterStatus="status=archived"
+      ;;
+    "deleted")
+      local_queryParameterStatus="status=deleted"
+      ;;
+    "all")
+      local_queryParameterStatus="status=live&status=archived&status=deleted"
+      ;;
+    esac
+    recordCount=`curl -s -X GET --url "${ac_url}project/search?${local_queryParameterStatus}" -u "${ac_user}" -H "${h_a_json}" | jq '.total'`
+    numPages=${recordCount}/${maxResults}
+  else
+    prinf "count() needs the \"status\" parameter\n"
+  fi
+}
+
+function isJSWProject() {
+  local_projectTypeKey=`curl -s -X GET --url "${ac_url}project/${1:u}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.projectTypeKey'`
+  if [[ ${local_projectTypeKey} == "software" ]]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+function isExistsProjectIdOrKey() {
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-projects/#api-rest-api-3-project-projectidorkey-get
+  if [ -z $1 ]; then
+    # empty argument returns "not found"
+    return 1
+  fi
+  integer local_http_return_code=`curl -i -s -X GET --url "${ac_url}project/${1:u}" -u "${ac_user}" -H "${h_a_json}" | grep "^HTTP" | awk '{print $2}'`
+  if [ ${local_http_return_code} -eq 200 ]; then
+    typeset local_isArchived=`curl -s -X GET --url "${ac_url}project/${1:u}" -u "${ac_user}" -H "${h_a_json}" | jq '.archived'`
+    if [[ ${local_isArchived} == "true" ]]; then
+      # project is archived
+      return 2
+    else
+      typeset local_isDeleted=`curl -s -X GET --url "${ac_url}project/${1:u}" -u "${ac_user}" -H "${h_a_json}" | jq '.deleted'`
+      if [[ ${local_isDeleted} == "true" ]]; then
+        # project is deleted
+        return 3
+      else
+        # project exists
+        return 0
+      fi
+    fi
+  else
+    # project not found
+    return 1
+  fi
+}
+
+case ${1:l} in
+"count")
+  case $2 in
+  "live")
+    ;;
+  "archived")
+    ;;
+  "deleted")
+    ;;
+  "all")
+    ;;
+  *)
+    count "live"; printf "live     %4u\n" ${recordCount}
+    count "archived"; printf "archived %4u\n" ${recordCount}
+    count "deleted"; printf "deleted  %4u\n" ${recordCount}
+    count "all"; printf "all      %4u\n" ${recordCount}
+    exit
+    ;;
+  esac
+  count $2; printf "%u\n" ${recordCount}
+  ;;
+
+"countissues")
+  if [ -z $2 ]; then
+    printf ${commandUsages[${1:l}]} ${(k)commandUsages[${1:l}]}
+    exit
+  fi
+  shift
+  optionAllProjects=false
+  optionGrantTotal=false
+  while getopts "ac" opt; do
+    case $opt in
+    a)
+      optionAllProjects=true
+      ;;
+    c)
+      optionGrantTotal=true
+      ;;
+    esac
+  done
+  shift $((OPTIND-1))
+  if [ ! -z $2 ]; then
+    optionAllProjects=false
+  fi
+  typeset -a projectKeys
+  if ${optionAllProjects}; then
+    projectKeys=(`getValuesByKey key "live"`)
+  else
+    for projectKey in $*; do
+      isExistsProjectIdOrKey ${projectKey}
+      isExistsProjectIdOrkey_returnCode=$?
+      if [ ${isExistsProjectIdOrkey_returnCode} -eq 1 ]; then
+        printf "ProjectKey \"%s\" not found.\n" ${projectKey}
+      else
+        if [ ${isExistsProjectIdOrkey_returnCode} -eq 2 ]; then
+        printf "ProjectKey \"%s\" is archived.\n" ${projectKey}
+        else
+          if [ ${isExistsProjectIdOrkey_returnCode} -eq 0 ]; then
+            projectKeys+=${projectKey:u}
+          fi
+        fi
+      fi
+      shift
+    done
+  fi
+  integer projectIssuesCount=0
+  integer sumOfProjectIssuesCount=0
+  for projectKey in ${projectKeys}; do
+    if ! ${optionGrantTotal}; then
+      printf "%s," ${projectKey}
+    fi
+    # https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-search/#api-rest-api-3-search-get
+    projectIssuesCount=`curl -s -X GET --url "${ac_url}search?jql=project=${projectKey}&fields=summary" -u "${ac_user}" -H "${h_a_json}" | jq '.total'`
+    if ! ${optionGrantTotal}; then
+      printf "%u\n" ${projectIssuesCount}
+    fi
+    sumOfProjectIssuesCount=$sumOfProjectIssuesCount+$projectIssuesCount
+  done
+  if ${optionGrantTotal}; then
+    printf "%u\n" ${sumOfProjectIssuesCount}
+  fi
+  ;;
+
+"valuesbykey")
+  if [ ! -z $2 ] || [ ! -z $3 ]; then
+    getValuesByKey $2 $3
+  else
+    printf ${commandUsages[${1:l}]} ${(k)commandUsages[${1:l}]}
+  fi
+  ;;
+
+"listkeys")
+  curl -s -X GET --url "${ac_url}project/search?expand=description,projectKeys,lead,issueTypes,url,insight" -u "${ac_user}" -H  "${h_a_json}" | jq -r '.values[0] | keys_unsorted | .[]'
+  ;;
+
+
+"json")
+  count "all"
+  integer startIndex
+  integer pageCounter
+  for pageCounter in {0..$numPages}; do
+    startIndex=${pageCounter}*${maxResults}
+    curl -s -X GET --url "${ac_url}project/search?expand=projectKeys,permissions&startAt=${startIndex}&maxResults=${maxResults}&status=live&status=archived&status=deleted" -u "${ac_user}" -H "${h_a_json}" | jq '.values[]'
+  done
+  ;;
+
+"csv")
+  count "live"
+  integer startIndex
+  integer pageCounter
+  printf "projectId,projectKey,projectKeys,projectName,projectCategory,projectType,isArchived,isDeleted,canEdit\n"
+  for pageCounter in {0..$numPages}; do
+    startIndex=${pageCounter}*${maxResults}
+    curl -s -X GET --url "${ac_url}project/search?expand=projectKeys,permissions&startAt=${startIndex}&maxResults=${maxResults}&status=live&status=archived" \
+      -u "${ac_user}" -H "${h_a_json}" | \
+      jq -r '[.values[]] | sort_by(.key) | .[] | [ (.id|tonumber), .key, (.projectKeys|join("|")), .name, .projectCategory.name, .projectTypeKey, (if .archivedDate == null then "NA" else (.archivedDate[0:10]) end), (if .deletedDate == null then "NA" else (.deletedDate[0:10]) end), .permissions.canEdit ] | @csv'
+  done
+  ;;
+
+"keybyproject")
+  if [ -z $2 ] || [ -z $3 ]; then
+    printf ${commandUsages[keybyproject]} ${(k)commandUsages[keybyproject]}
+  else  
+    shift
+    optionListKeys=false
+    while getopts "k" opt; do
+      case $opt in
+      k)
+        optionListKeys=true
+        ;;
+      esac
+    done
+    shift $((OPTIND-1))
+    if ${optionListKeys}; then
+      curl -s -X GET --url "${ac_url}project/${1:u}" -u "${ac_user}" -H "${h_a_json}" | jq -r 'keys_unsorted | .[]'
+    else
+      getKeyByProjectKeyOrId $1 $2
+      if [[ ${result_getKeyByProjectKeyOrId} != "null" ]]; then
+        printf "%s\n" ${result_getKeyByProjectKeyOrId}
+      fi
+    fi
+  fi
+  ;;
+
+"features")
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-project-features/#api-group-project-features
+  if [ -z $2 ]; then
+    printf ${commandUsages[${1:l}]} ${(k)commandUsages[${1:l}]}
+    exit
+  fi
+  shift
+  optionAllProjects=false
+  optionJSON=false
+  while getopts "aj" opt; do
+    case $opt in
+    a)
+      optionAllProjects=true
+      ;;
+    j)
+      optionJSON=true
+      ;;
+    esac
+  done
+  shift $((OPTIND-1))
+  if [ ! -z $2 ]; then
+    # invalidate option if user specified more arguments
+    optionAllProjects=false
+  fi
+  typeset -a projectIdOrKeys
+  if ${optionAllProjects}; then
+    projectIdOrKeys=(`getValuesByKey key "live"`)
+  else
+    for projectIdOrKey in $*; do
+      isExistsProjectIdOrKey ${projectIdOrKey:u}
+      isExistsProjectIdOrKey_returnCode=$?
+      if [ ${isExistsProjectIdOrKey_returnCode} -eq 1 ]; then
+        printf "projectIdOrKey \"%s\" not found.\n" ${projectIdOrKey:u}
+      else
+        if [ ${isExistsProjectIdOrKey_returnCode} -eq 2 ]; then
+        printf "projectIdOrKey \"%s\" is archived.\n" ${projectIdOrKey:u}
+        else
+          if [ ${isExistsProjectIdOrKey_returnCode} -eq 0 ]; then
+            isJSWProject ${projectIdOrKey:u}
+            isJSWProject_returnCode=$?
+            if [ ${isJSWProject_returnCode} -ne 0 ]; then
+              printf "%s is not a JSWProject\n" ${projectIdOrKey:u}
+            else
+              projectIdOrKeys+=${projectIdOrKey:u}
+            fi
+          fi
+        fi
+      fi
+      shift
+    done
+  fi
+  if ! ${optionJSON} && [ ! -z ${projectIdOrKeys[@]:0:1} ]; then
+    featureColumnHeader=`curl -s -X GET --url "${ac_url}project/${projectIdOrKeys[@]:0:1}/features" -u "${ac_user}" -H "${h_a_json}" | \
+      jq -r '[.features[]] | sort_by(.localisedName) | [( [ [.[].localisedName] ] | transpose | .[] | join(":") )] | join(",")'`
+    printf "projectKey,%s\n" ${featureColumnHeader}
+  fi
+  for projectIdOrKey in ${projectIdOrKeys}; do
+    # https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-project-features/#api-rest-api-3-project-projectidorkey-features-get
+    isJSWProject ${projectIdOrKey:u}
+    isJSWProject_returnCode=$?
+    if [ ${isJSWProject_returnCode} -ne 0 ]; then
+      continue
+    fi
+    if ${optionJSON}; then
+      curl -s -X GET --url "${ac_url}project/${projectIdOrKey}/features" -u "${ac_user}" -H "${h_a_json}" | jq '.features[]'
+    else
+      getKeyByProjectKeyOrId ${projectIdOrKey} key
+      projectKey=${result_getKeyByProjectKeyOrId}
+      curl -s -X GET --url "${ac_url}project/${projectIdOrKey}/features" -u "${ac_user}" -H "${h_a_json}" | \
+        jq -r --arg projectKey $projectKey '[.features[]] | sort_by(.localisedName) | [( [ [.[].state] ] | transpose | .[] | join(":") )] | join(",") | "\"" + $projectKey + "\"," + .' | sed "s/ENABLED/Y/g" | sed "s/DISABLED/N/g"
+    fi
+  done
+  ;;
+
+"archive")
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-projects/#api-rest-api-3-project-projectidorkey-archive-post
+  if [ -z $2 ]; then
+    printf ${commandUsages[${1:l}]} ${(k)commandUsages[${1:l}]}
+    exit
+  fi
+  shift
+  typeset -a projectsArray
+  for projectIdOrKey in $*; do
+    isExistsProjectIdOrKey ${projectIdOrKey}
+    isExistsProjectIdOrkey_returnCode=$?
+    if [ ${isExistsProjectIdOrkey_returnCode} -eq 0 ]; then
+      projectsArray+=${projectIdOrKey:u}
+    else
+      if [ ${isExistsProjectIdOrkey_returnCode} -eq 2 ]; then
+        printf "%s already archived.\n" ${projectIdOrKey}
+      else
+        if [ ${isExistsProjectIdOrkey_returnCode} -eq 1 ]; then
+          printf "%s not found.\n" ${projectIdOrKey}
+        else
+          printf "function isExistsProjectIdOrKey() returned unexpectly with %u.\n" ${isExistsProjectIdOrkey_returnCode}
+        fi
+      fi
+    fi
+    shift
+  done
+
+  for projectIdOrKey in ${projectsArray}; do
+    http_response=`curl -i -s -X POST --url "${ac_url}project/${projectIdOrKey}/archive" -u "${ac_user}" -H "${h_a_json}"`
+    http_return_code=`echo $http_response | grep "^HTTP" | awk '{print $2}'`
+    if [ $http_return_code -eq 203 ]; then
+      printf "%s,archived\n" ${projectIdOrKey}
+    fi
+    if [ $http_return_code -ge 400 ]; then
+      json_error_response=`echo $http_response | grep "{\"errorMessage" | jq '.'`
+      printf "%s,%u-%s\n" ${projectIdOrKey} ${http_return_code} ${json_error_response}
+    fi
+  done
+  ;;
+
+"restore")
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-projects/#api-rest-api-3-project-projectidorkey-restore-post
+  if [ -z $2 ]; then
+    printf ${commandUsages[restore]} ${(k)commandUsages[restore]}
+    exit
+  fi
+  shift
+  typeset -a projectsArray
+  for projectIdOrKey in $*; do
+    isExistsProjectIdOrKey ${projectIdOrKey}
+    isExistsProjectIdOrkey_returnCode=$?
+    if [ ${isExistsProjectIdOrkey_returnCode} -eq 0 ]; then
+      printf "%s project is live.\n" ${projectIdOrKey}
+    else
+      if [ ${isExistsProjectIdOrkey_returnCode} -eq 2 ]; then
+        projectsArray+=${projectIdOrKey:u}
+      else
+        if [ ${isExistsProjectIdOrkey_returnCode} -eq 1 ]; then
+          printf "%s not found.\n" ${projectIdOrKey}
+        else
+          printf "function isExistsProjectIdOrKey() returned unexpectly with %u.\n" ${isExistsProjectIdOrkey_returnCode}
+        fi
+      fi
+    fi
+    shift
+  done
+
+  for projectIdOrKey in ${projectsArray}; do
+    http_response=`curl -i -s -X POST --url "${ac_url}project/${projectIdOrKey}/restore" -u "${ac_user}" -H "${h_a_json}"`
+    http_return_code=`echo $http_response | grep "^HTTP" | awk '{print $2}'`
+    if [ $http_return_code -eq 200   ]; then
+      printf "%s,restored\n" ${projectIdOrKey}
+    fi
+    if [ $http_return_code -ge 400 ]; then
+      json_error_response=`echo $http_response | grep "{\"errorMessage" | jq '.'`
+      printf "%s,%u-%s\n" ${projectIdOrKey} ${http_return_code} ${json_error_response}
+    fi
+  done
+  ;;
+
+"delete")
+  if [ ! -z $2 ]; then
+    shift
+    option_DeleteAllProjects="false"
+    option_AsynchDeleteInformation="false"
+    while getopts "ai" opt; do
+      case $opt in
+      a)
+        option_DeleteAllProjects="true"
+        ;;
+      i)
+        option_AsynchDeleteInformation="true"
+        ;;
+      esac
+    done
+    shift $((OPTIND-1))
+
+    if [[ ${option_AsynchDeleteInformation} == "true" ]]; then
+      if [ ! -f ${logfileForTasks} ]; then
+        touch ${logfileForTasks}
+      fi
+      cat ${logfileForTasks} | while read line; do
+        # https://developer.atlassian.com/cloud/jira/platform/rest/v2/api-group-tasks/#api-rest-api-2-task-taskid-get
+        printf "%s," `echo ${line} | awk  -F ',' '{print $1}'`
+        printf "%s," `echo ${line} | awk  -F ',' '{print $2}'`
+        taskUrl=`echo ${line} | awk  -F ',' '{print $3}'`
+        curl -s ${taskUrl} -u "${ac_user}" | jq -r '.progress'
+      done
+      exit
+    fi
+    typeset -a projectIds
+    if [[ ${option_DeleteAllProjects} == "true" ]]; then
+      projectIds=(`getValuesByKey id "all"`) 
+    else
+      for projectIdOrKey in $*; do
+        isExistsProjectIdOrKey ${projectIdOrKey}
+        isExistsProjectIdOrkey_returnCode=$?
+        if [ ${isExistsProjectIdOrkey_returnCode} -eq 1 ]; then
+          printf "projectIdOrKey \"%s\" not found.\n" ${projectIdOrKey}
+        else
+          if [ ${isExistsProjectIdOrkey_returnCode} -eq 2 ]; then
+          printf "projectIdOrKey \"%s\" is archived.\n" ${projectIdOrKey}
+          else
+            if [ ${isExistsProjectIdOrkey_returnCode} -eq 0 ]; then
+              if [[ ! ${projectIdOrKey} =~ '^[0-9]+$' ]]; then
+                getKeyByProjectKeyOrId ${projectIdOrKey} id
+                projectIds+=${result_getKeyByProjectKeyOrId}
+              else
+                projectIds+=${projectIdOrKey:u}
+              fi
+            else
+              printf "function isExistsProjectIdOrKey() returned unexpectly with %u.\n" ${isExistsProjectIdOrkey_returnCode}
+            fi
+          fi
+        fi
+        shift
+      done
+    fi
+
+    vared -p "${#projectIds[@]} projects will forever be deleted. Yes? " -c YesNo_Delete
+    if [[ ${YesNo_Delete} != [Yy]* ]]; then
+      printf "All good, nothing happened.\n"
+      exit
+    fi
+    #
+    # rotate logfileForTasks?
+    #
+    if [ -f ${logfileForTasks} ]; then
+      printf "\"%s\" contains %u entries. " ${logfileForTasks} `cat ${logfileForTasks} | wc -l`
+      vared -p "Rotate file, yes? " -c YesNoReset_logfileForTasks
+      if [[ ${YesNoReset_logfileForTasks} == [Yy]* ]]; then 
+        mv ${logfileForTasks} ${logfileForTasks}_${timestampDateOnly}T${timestampTimeOnly}.csv
+      fi
+    fi  
+
+    typeset -r deleteLogFile="ajcProjects_DeleteLog_${timestampDateOnly}T${timestampTimeOnly}.csv"
+
+    for projectId in ${projectIds}; do
+      getKeyByProjectKeyOrId ${projectId} "key"
+      projectKey=${result_getKeyByProjectKeyOrId}
+      http_response=`curl -i -s -X POST --url "${ac_url}project/${projectId}/delete" -u "${ac_user}"`
+      async_task_url=$(echo $http_response | grep "^location" | awk '{print $2}' | sed "s/\r//")
+      http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
+      json_error_response=`echo $http_response | grep "^{" | jq -r '.errorMessages[]'`
+      printf "%s,%s," ${projectId} ${projectKey} | tee -a ${deleteLogFile}
+      if [ $http_return_code -eq 303 ]; then
+        sleep 2
+        async_task_progress=`curl -s ${async_task_url} -u "${ac_user}" | jq -r '.progress'  | tee -a ${deleteLogFile}`
+        printf "%s\n" ${async_task_progress}
+        if [[ ${async_task_progress} != "100" ]]; then
+          printf "%s,%s,%s\n" ${projectId} ${projectKey} ${async_task_url} >> ${logfileForTasks}
+        fi
+      fi
+      if [ $http_return_code -ge 400 ]; then
+
+        printf "\"%u-%s\"\n" $http_return_code ${json_error_response} | tee -a ${deleteLogFile}
+      fi
+    done
+  else
+    printf ${commandUsages[${1:l}]} ${(k)commandUsages[${1:l}]}
+  fi
+  ;;
+
+"help")
+  printf "\nHelp for %s commands:\n\n" $(basename "$0")
+  for command commandUsage in ${(kv)commandUsages}; do
+    printf ${commandUsage} ${command}
+    printf "\n"
+  done
+  printf "%s - usage examples:\n" $ac_command
+  printf "  o) list deleted projects in JSON format\n"
+  printf "\t%s json | jq 'select(.deleted)'\n" $ac_command
+  printf "  o) list archived projects in a table\n"
+  printf "\t%s csv | xsv search -s isArchived \"^[0-9]\" | xsv table\n" $ac_command
+  printf "  o) list features of all \"software\" projects in a table\n"
+  printf "\t%s features -a | xsv table\n" $ac_command
+  ;;
+
+*)
+  $(basename "$0") help
+  ;;
+esac

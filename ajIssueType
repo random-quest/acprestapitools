@@ -1,0 +1,56 @@
+#!/bin/zsh
+# 
+source ac_lib `basename $0`
+declare -a available_keywords=("count" "jsonObjectKeys" "getIssueTypeIds" "csv" "json" "createAvatarsUpdateFile" "updateAvatarsFromFile")
+if [[ -z $1 ]]; then; user_keyword="hugo"; else; user_keyword=$1; fi
+if ! is_keyword_valid ${user_keyword} ${available_keywords[@]}; then; exit 0; fi
+
+function count() {
+  curl -s -X GET --url "${ac_url}issuetype" -u "${ac_user}" -H "${h_a_json}" | jq '. | length'
+}
+
+function getIssueTypeIds() {
+  curl -s -X GET --url "${ac_url}issuetype" -u "${ac_user}" -H "${h_a_json}" | jq '[(.[].id|tonumber)] | sort | .[]'
+}
+
+case $1 in
+"count")
+  count
+  ;;
+"jsonObjectKeys")
+  curl -s -X GET --url "${ac_url}issuetype" -u "${ac_user}" -H  "${h_a_json}" | jq -r '.[0] | keys_unsorted | .[]'
+  ;;
+"getIssueTypeIds")
+  getIssueTypeIds
+  ;;
+"csv")
+  printf "issueTypeId,name,untranslatedName,description,avatarId\n"
+  curl -s -X GET --url "${ac_url}issuetype" -u "${ac_user}" -H  "${h_a_json}" | jq -r '[.[]] | sort_by(.id) | .[] | [(.id|tonumber), .name, .untranslatedName, .description, .avatarId] | @csv'
+  ;;
+"json")
+  curl -s -X GET --url "${ac_url}issuetype" -u "${ac_user}" -H  "${h_a_json}" | jq '.[]'
+  ;;
+"createAvatarsUpdateFile")
+  printf "issueTypeId,avatarId,issuetypeName\n"
+  curl -s -X GET --url "${ac_url}issuetype" -u "${ac_user}" -H "${h_a_json}" | jq -r '[.[]] | sort_by(.id) | .[] | [(.id|tonumber), .avatarId, .name] | @csv'
+  ;;
+"updateAvatarsFromFile")
+  if [ ! -f $2 ]; then
+    print_command_usage $1 "<avatarsUpdateFile>"
+    exit
+  fi
+  cat $2 | tail -n +2 | while read line; do
+    issueTypeId=`echo $line | awk -F ',' '{print$1}'`
+    avatarId=`echo $line | awk -F ',' '{print$2}'`
+    http_response=`curl -i -s -X PUT --url "${ac_url}issuetype/${issueTypeId}" -u "${ac_user}" -H "${h_a_json}" -H "${h_ct_json}" --data "$(jq -n --arg avatarId ${avatarId} '{"avatarId": $avatarId}')"`
+    http_return_code=$(echo ${http_response} | grep "^HTTP" | awk '{print $2}')
+    if [ 200 -eq ${http_return_code} ]
+    then
+      json_response=`echo ${http_response} | grep -E "{\"self"`
+      echo "Updated Avatar of Issue Type ${issueTypeId} to ${avatarId}" 
+    else
+      echo "Issue Type ${issueTypeId} returned ${http_return_code}. Check manually!"
+    fi
+  done
+  ;;
+esac

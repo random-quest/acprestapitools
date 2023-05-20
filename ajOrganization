@@ -1,0 +1,58 @@
+#!/bin/zsh
+# based on https://developer.atlassian.com/cloud/jira/service-desk/rest/api-group-organization/#api-group-organization
+source ac_lib `basename $0`
+declare -a available_keywords=("get" "create" "delete")
+if [[ -z $1 ]]; then; user_keyword="hugo"; else; user_keyword=$1; fi
+if ! is_keyword_valid ${user_keyword} ${available_keywords[@]}; then; exit 0; fi
+
+
+case $1 in
+"get")
+  if [ -z $2 ]; then
+    print_command_usage $1 "(organizationId | X)"
+    exit
+  fi
+  if [[ $2 == "X" ]]; then
+    curl -s -X GET --url "${ac_sd_url}organization" -u "${ac_user}" -H "${h_a_json}" | jq
+  else
+    curl -s -X GET --url "${ac_sd_url}organization/${2}" -u "${ac_user}" -H "${h_a_json}" | jq
+  fi
+  ;;
+
+"create")
+  if [ -z $2 ]; then
+    print_command_usage $1 "\"name of organization\""
+    exit
+  fi
+  organizationName=$2
+  http_response=`curl -i -s -X POST --url "${ac_sd_url}organization" -u "${ac_user}" -H "${h_a_json}" -H "${h_ct_json}" --data "$(jq -n --arg organizationName "${organizationName}" '{ "name": $organizationName }')"`
+  http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
+  organizationId=`echo $http_response | grep -E "^{" | jq -r '.id'` 
+  organizationName=`echo $http_response | grep -E "^{" | jq '.name'` 
+  printf "%u,%s," ${organizationId} ${organizationName}
+  if [ 201 -eq $http_return_code ]; then
+    printf "added\n"
+  else
+    json_error_response=`echo $http_response | grep -E "{\"errorMessages"`
+    printf "add failed with code %u %s\n" ${http_return_code} ${json_error_response}
+  fi
+  ;;
+
+"delete")
+  if [ -z $2 ]; then
+    print_command_usage $1 "organizationId"
+    exit
+  fi
+  organizationId=$2
+  http_response=`curl -i -s -X DELETE --url "${ac_sd_url}organization/${organizationId}" -u "${ac_user}"`
+  http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
+  printf "%u," ${organizationId}
+  if [ 204 -eq $http_return_code ]; then
+    printf "deleted\n"
+  else
+    json_error_response=`echo $http_response | grep -E "{\"errorMessage"`
+    printf "deletion failed with code %u %s\n" ${http_return_code} ${json_error_response}
+  fi
+  ;;
+
+esac

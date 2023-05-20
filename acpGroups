@@ -1,0 +1,61 @@
+#!/bin/zsh
+source ac_lib `basename $0`
+# FIXME can we do this use case?
+# Group usage - List of project permission per group
+# An alternative way is to leverage Jira cloud REST Api to get the details to check if a group is being used in a permission scheme. See below for sample script.
+# [Group usage in permission schemes via REST api|https://confluence.atlassian.com/jirakb/how-to-find-group-usage-in-permission-schemes-for-jira-cloud-via-rest-api-and-python-1217306462.html]
+declare -a available_keywords=("count" "getids" "csv" "groupIdByName" "groupNameById")
+if [[ -z $1 ]]; then; user_keyword="hugo"; else; user_keyword=$1; fi
+if ! is_keyword_valid ${user_keyword} ${available_keywords[@]}; then; exit 0; fi
+
+typeset -i max_results
+max_results=50
+
+countgroups()
+{
+curl -s -X GET --url "${ac_url}group/bulk" --user "${ac_user}" --header "${h_a_json}" | jq '.total'
+}
+getids()
+{
+num_groups=$(countgroups)
+num_pages=$((${num_groups}/${max_results}))
+for i in `seq 0 ${num_pages}`
+do
+  curl -s -X GET --url "${ac_url}group/bulk?startAt=$(($i*${max_results}))&maxResults=${max_results}" -u "${ac_user}" -H "${h_a_json}" | jq '.values[].groupId'
+done
+}
+
+case $1 in
+"count")
+  countgroups
+  ;;
+
+"getids")
+  getids
+  ;;
+
+"csv")
+  num_groups=$(countgroups)
+  num_pages=$((${num_groups}/${max_results}))
+  printf "groupId,groupName\n"
+  for i in `seq 0 ${num_pages}`
+  do
+    curl -s -X GET --url "${ac_url}group/bulk?startAt=$(($i*${max_results}))&maxResults=${max_results}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[] | [ .groupId, .name ] | @csv'
+  done
+  ;; 
+
+"groupIdByName")
+  if [ -z $2 ]; then
+    print_command_usage $1 "groupName"
+    exit
+  fi
+  curl -s -X GET --url "${ac_url}group/bulk?groupName=${2}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[].groupId'
+  ;;
+
+"groupNameById")
+  if [ -z $2 ]; then
+    print_command_usage $1 "groupId"
+    exit
+  fi
+  curl -s -X GET --url "${ac_url}group/bulk?groupId=${2}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[].name'
+esac

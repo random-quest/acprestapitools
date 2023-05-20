@@ -1,0 +1,118 @@
+#!/bin/zsh
+# https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-label/#api-group-label
+source ac_lib `basename $0`
+typeset -A commandUsages
+commandUsages+=([count]="Count the number of labels. Usage:\n$ac_command %s ([--attachmentId <attachmentId> ...] | [--blogpostId <blogpostId> ...] | [--pageId <pageId> ...])\n")
+commandUsages+=([json]="Retrieve data in json format. Usage:\n$ac_command %s ([--spaceId <spaceId> ...] | [--labelId <labelId> ...])\n")
+commandUsages+=([csv]="Retrieves data in csv format. Usage:\n$ac_command %s ([--attachmentId <attachmentId> ...] | [--blogpostId <blogpostId> ...] | [--pageId <pageId> ...]) [--header (true | false)]\n\tavailable keys: $(printf "(%s)" ${(kj: | :)acc_LABEL_AVAILABLE_KEYS})\n")
+
+function ac_Print_Help() {
+  printf "\nHelp for %s commands:\n\n" $ac_command
+  for command commandUsage in ${(kv)commandUsages}; do
+    printf "%s - " $command
+    printf "${commandUsage}\n" ${command}
+  done
+  tabs -15
+  printf "Valid values:\n"
+  printf "  prefix\t(%s).\n" ${(kj: | :)acc_LABEL_PREFIX}
+  printf "\n%s usage examples:\n" $ac_command
+  tabs -5
+  tabs -8
+}
+
+if [[ ${1:l} == "count" || ${1:l} == "json" || ${1:l} == "csv" ]]; then
+  typeset subCommand=${1:l}
+  shift
+  zmodload zsh/zutil
+  typeset -a flag_csv_header=("--header" "true")
+  zparseopts -D -F -K -header=flag_csv_header -attachmentId+:=option_Id -blogpostId+:=option_Id -pageId+:=option_Id
+  if [ $? -gt 0 ]; then
+    printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+    exit
+  fi
+  if [ ${#option_Id[@]} -eq 0 ]; then
+    printf "No selection\n${commandUsages[${subCommand}]}" ${(k)commandUsages[${subCommand}]}
+    exit
+  fi
+
+  case $subCommand in
+    "count")
+      integer recordCount=0
+      ;;
+    "csv")
+      if [[ ${flag_csv_header[2]} == "true" ]]; then
+        printf "labelId,attachmentId,blogpostId,pageId,name,prefix\n"
+      fi
+      ;;
+  esac
+
+  # Main loop
+  integer --r ac_LIMIT=${(v)ac_LIM[Max]}
+  for opt value in $option_Id; do
+    # determine endpoint
+    rest_endpoint=""
+    attachmentId="N/A"
+    blogpostId="N/A"
+    pageId="N/A"
+    case $opt in
+      "--attachmentId")
+        rest_endpoint="attachments/${value}/labels"
+        attachmentId=$value
+        ;;
+      "--blogpostId")
+        rest_endpoint="blogposts/${value}/labels"
+        blogpostId=$value
+        ;;
+      "--pageId")
+        rest_endpoint="pages/${value}/labels"
+        pageId=$value
+        ;;
+    esac
+    ac_ACC_LINK="init"
+    ac_ACC_LINK_REL="next"
+    while [ ! -z $ac_ACC_LINK ] && [[ $ac_ACC_LINK_REL == "next" ]]; do
+      if [[ $ac_ACC_LINK == "init" ]]; then
+        curl_command="curl -i -s -X GET --url \"${ac_URL_WIKI2}${rest_endpoint}?limit=${ac_LIMIT}\" -u ${ac_AUTH} -H ${acHA_JSON}" 
+        if [ -v flag_verbose ]; then
+          echo $curl_command
+        fi
+        ac_HTTP_PARSE "`eval ${curl_command}`"
+      else
+        curl_command="curl -i -s -X GET --url \"${ac_URL_SITE}${ac_ACC_LINK}\" -u ${ac_AUTH} -H ${acHA_JSON}"
+        if [ -v flag_verbose ]; then
+          echo $curl_command
+        fi
+        ac_HTTP_PARSE "`eval ${curl_command}`"
+      fi
+      # work cursor
+      case $subCommand in
+      "count")
+        recordCount+=`echo $ac_JSON_STRING | grep "^{" | jq -r '.results | length'`
+        ;;
+      "json")
+        echo $ac_JSON_STRING | jq '.results[]'
+        ;;
+      "csv")
+        echo $ac_JSON_STRING | jq -r --arg attachmentId $attachmentId --arg blogpostId $blogpostId --arg pageId $pageId '.results[] | [ .id, $attachmentId, $blogpostId, $pageId, .name, .prefix ] | @csv'
+        ;;
+      esac
+    done
+  done
+  # end of Main loop
+  case ${subCommand} in
+    "count")
+      printf "%u\n" ${recordCount}
+      ;;
+  esac
+  exit
+fi
+
+case ${1:l} in
+"help")
+  ac_Print_Help
+  ;;
+
+*)
+  ac_Print_Help
+  ;;
+esac  

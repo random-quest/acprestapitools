@@ -1,0 +1,210 @@
+#!/bin/zsh
+# https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-page/#api-group-page
+  # FIXME validate spaceId and labelId
+  # FIXME add STDIN
+while read -t 1 -u 0 line; do
+  ac_STDIN+=($line)
+done
+
+source ac_lib `basename $0`
+typeset -A commandUsages
+commandUsages+=([count]="Count the number of pages. Usage:\n$ac_command %s ([--spaceId <spaceId> ...] | [--labelId <labelId> ...])\n")
+commandUsages+=([json]="Retrieve data in json format. Usage:\n$ac_command %s ([--spaceId <spaceId> ...] | [--labelId <labelId> ...])\n")
+commandUsages+=([csv]="Retrieves data in csv format. Usage:\n$ac_command %s ([--spaceId <spaceId> ...] | [--lableId <labelId> ...]) [--column <key>0...3] [--header (true | false)]\n\tavailable keys: $(printf "(%s)" ${(kj: | :)acc_PAGE_AVAILABLE_KEYS})\n")
+
+function ac_Print_Help() {
+  printf "\nHelp for %s commands:\n\n" $ac_command
+  for command commandUsage in ${(kv)commandUsages}; do
+    printf "%s - " $command
+    printf "${commandUsage}\n" ${command}
+  done
+  tabs -15
+  printf "Valid values:\n"
+  printf "  status\t(%s).\n" ${(kj: | :)acc_PAGE_STATUS}
+  printf "\n%s usage examples:\n" $ac_command
+  tabs -5
+  printf "  o) json: select by a name\n"
+  printf "\t%s json | jq 'select(.name=="name")'\n" $ac_command
+  printf "  o) json: count elements\n"
+  printf "\t%s json | jq -s '[.][] | length'\n" $ac_command
+  printf "  o) csv: sort -R by createdAt\n"
+  printf "\t%s csv --spaceId 123456789 | xsv sort -R -N -s createdAt_UT\n" $ac_command
+  tabs -8
+}
+
+function populate_option_Id_from_STDIN() {
+  if [ ${#ac_STDIN[@]} -gt 0 ]; then
+    typeset local_id
+    typeset local_option_name="unset"
+
+    case $ac_STDIN[1] in
+      "spaceId")
+        local_option_name="spaceId"
+        ;;
+      "labelId")
+        local_option_name="labelId"
+        ;;
+      "pageId")
+        local_option_name="pageId"
+        ;;
+    esac
+    if [[ $local_option_name == "unset" ]]; then
+      printf "STDIN option not recognized\n"
+      exit
+    else
+      unset 'ac_STDIN[1]'
+      option_Id=()
+      for local_id in $ac_STDIN; do
+        option_Id+=("--$local_option_name" $local_id)
+      done
+    fi
+  fi
+}
+
+
+if [[ ${1:l} == "count" || ${1:l} == "json" || ${1:l} == "csv" ]]; then
+  # https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-page/#api-pages-get
+  typeset subCommand=${1:l}
+  shift
+  zmodload zsh/zutil
+  typeset -a flag_csv_header=("--header" "true")
+  typeset -a option_Id=("allpages" "allpages")
+  populate_option_Id_from_STDIN
+  zparseopts -D -F -K  {v,-verbose}=flag_verbose -column+:=option_columns -header=flag_csv_header -spaceId+:=option_Id -labelId+:=option_Id -pageId+:=option_pageId -bodyFormat:=option_bodyFormat
+  if [ $? -gt 0 ]; then
+    printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+    exit
+  fi
+  if [ ${#option_columns[@]} -gt 6 ]; then
+    printf "maximum num of --column options exceeded\n${commandUsages[${subCommand}]}" ${(k)commandUsages[${subCommand}]}
+    exit
+  fi
+  for opt column in $option_columns; do
+    if [ -z ${(k)acc_PAGE_AVAILABLE_KEYS[${column}]} ]; then
+      printf "unmatched --column\n${commandUsages[${subCommand}]}" ${(k)commandUsages[${subCommand}]}
+      exit
+    else
+      option_columns_headers+=",${(k)acc_PAGE_AVAILABLE_KEYS[${column}]}"
+    fi
+  done
+  if [ -v option_bodyFormat ]; then
+    if [ -z ${(k)acc_PAGE_BODYFORMAT[${option_bodyFormat[2]}]} ]; then
+      printf "unmatched option --bodyFormat\n%s\n" ${(kj: | :)acc_PAGE_BODYFORMAT} 
+      exit
+    else
+      param_bodyformat="body-format=${option_bodyFormat[2]}"
+    fi
+  fi
+
+  if [ -v option_pageId ]; then
+    # --pageId overrides options --spaceId, --labelId
+    case $subCommand in
+      "csv")
+        printf "spaceId,pageId,parentId,status,version,updatedAuthorId,updatedAt,updatedAt_UT,createdAuthorId,createdAt,createdAt_UT,title\n"
+        ;;
+    esac
+    for opt value in $option_pageId; do
+      curl_command="curl -i -s -X GET --url \"${ac_URL_WIKI2}pages/${value}?${param_bodyformat}\" -u ${ac_AUTH} -H ${acHA_JSON}" 
+      if [ -v flag_verbose ]; then
+        echo $curl_command
+      fi
+      ac_HTTP_PARSE "`eval ${curl_command}`"
+      case $subCommand in
+        "json")
+          echo $ac_JSON_STRING | jq 
+          ;;
+        "csv")
+          echo $ac_JSON_STRING | jq -r '[ .spaceId, .id, .parentId, .status, .version.number, .version.authorId, .version.createdAt, (.version.createdAt[:19]+"Z"|strptime("%Y-%m-%dT%H:%M:%SZ")|mktime), .authorId, .createdAt, (.createdAt[:19]+"Z"|strptime("%Y-%m-%dT%H:%M:%SZ")|mktime), .title ] | @csv'
+          ;;
+      esac
+    done
+  else
+    # multi result  
+    case $subCommand in
+      "count")
+        integer recordCount=0
+        ;;
+      "csv")
+        if [[ ${flag_csv_header[2]} == "true" ]]; then
+          if [ ${#option_columns[@]} -eq 0 ]; then
+            printf "spaceId,pageId,parentId,status,version,updatedAuthorId,updatedAt,updatedAt_UT,createdAuthorId,createdAt,createdAt_UT,title\n"
+          else
+            printf "spaceId,pageId,parentId%s\n" $option_columns_headers
+          fi
+        fi
+        ;;
+    esac
+    integer --r ac_LIMIT=${(v)ac_LIM[Max]}
+    for opt value in $option_Id; do
+      # determine endpoint
+      case $opt in
+        "allpages")
+          rest_endpoint="pages"
+          ;;
+        "--spaceId")
+          rest_endpoint="spaces/${value}/pages"
+          ;;
+        "--labelId")
+          rest_endpoint="labels/${value}/pages"
+          ;;
+      esac
+      ac_ACC_LINK="init"
+      ac_ACC_LINK_REL="next"
+      while [ ! -z $ac_ACC_LINK ] && [[ $ac_ACC_LINK_REL == "next" ]]; do
+        if [[ $ac_ACC_LINK == "init" ]]; then
+          curl_command="curl -i -s -X GET --url \"${ac_URL_WIKI2}${rest_endpoint}?limit=${ac_LIMIT}&${param_bodyformat}\" -u ${ac_AUTH} -H ${acHA_JSON}" 
+          if [ -v flag_verbose ]; then
+            echo $curl_command
+          fi
+          ac_HTTP_PARSE "`eval ${curl_command}`"
+        else
+          curl_command="curl -i -s -X GET --url \"${ac_URL_SITE}${ac_ACC_LINK}\" -u ${ac_AUTH} -H ${acHA_JSON}"
+          if [ -v flag_verbose ]; then
+            echo $curl_command
+          fi
+          ac_HTTP_PARSE "`eval ${curl_command}`"
+        fi
+        # work cursor
+        case $subCommand in
+        "count")
+          recordCount+=`echo $ac_JSON_STRING | grep "^{" | jq -r '.results | length'`
+          ;;
+        "json")
+          echo $ac_JSON_STRING | jq 
+          ;;
+        "csv")
+          if [ ${#option_columns[@]} -eq 0 ]; then
+            echo $ac_JSON_STRING | jq -r '.results[] | [ .spaceId, .id, .parentId, .status, .version.number, .version.authorId, .version.createdAt, (.version.createdAt[:19]+"Z"|strptime("%Y-%m-%dT%H:%M:%SZ")|mktime), .authorId, .createdAt, (.createdAt[:19]+"Z"|strptime("%Y-%m-%dT%H:%M:%SZ")|mktime), .title ] | @csv'
+          fi
+          if [ ${#option_columns[@]} -eq 2 ]; then
+            echo $ac_JSON_STRING | jq -r --arg key1 ${option_columns[2]} '.results[] | [ .spaceId, .id, .parentId, .[$key1] ] | @csv'
+          fi
+          if [ ${#option_columns[@]} -eq 4 ]; then
+            echo $ac_JSON_STRING | jq -r --arg key1 ${option_columns[2]} --arg key2 ${option_columns[4]} '.results[] | [ .spaceId, .id, .parentId, .[$key1], .[$key2] ] | @csv'
+          fi
+          if [ ${#option_columns[@]} -eq 6 ]; then
+            echo $ac_JSON_STRING | jq -r --arg key1 ${option_columns[2]} --arg key2 ${option_columns[4]} --arg key3 ${option_columns[6]} '.results[] | [ .spaceId, .id, .parentId, .[$key1], .[$key2], .[$key3] ] | @csv'
+          fi
+          ;;
+        esac
+      done
+    done
+    case ${subCommand} in
+      "count")
+        printf "%u\n" ${recordCount}
+        ;;
+    esac
+    # end of multi result
+  fi
+  exit
+fi
+
+case ${1:l} in
+"help")
+  ac_Print_Help
+  ;;
+
+*)
+  ac_Print_Help
+  ;;
+esac  

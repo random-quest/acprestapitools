@@ -1,0 +1,65 @@
+#!/bin/zsh
+# based on https://developer.atlassian.com/cloud/jira/service-desk/rest/api-group-customer/#api-group-customer
+# https://developer.atlassian.com/cloud/jira/service-desk/rest/api-group-servicedesk/#api-rest-servicedeskapi-servicedesk-servicedeskid-customer-get
+source ac_lib `basename $0`
+declare -a available_keywords=("count" "json" "csv")
+if [[ -z $1 ]]; then; user_keyword="hugo"; else; user_keyword=$1; fi
+if ! is_keyword_valid ${user_keyword} ${available_keywords[@]}; then; exit 0; fi
+
+max_results=50
+typeset -u servicedesk
+
+#function hugo()
+#{
+#  local servicedesk=$1
+#  local isLastPage
+#  isLastPage=false
+#}
+
+case $1 in
+"json")
+  if [ -z $2 ]; then
+    print_command_usage $1 "projectIdOrKey"
+    exit
+  fi
+  servicedesk=$2
+  isLastPage=false
+  typeset -i pagination_index
+  pagination_index=0
+  while ! $(${isLastPage}); do
+    http_response=`curl -s -X GET --url "${ac_sd_url}servicedesk/${servicedesk}/customer?start=${pagination_index}&limit=${max_results}" -u "${ac_user}" -H "${h_a_json}" -H "${h_x_experimental}"`
+    isLastPage=`echo ${http_response} | jq '.isLastPage'`
+    echo ${http_response} | jq '.values[]'
+    pagination_index=${pagination_index}+${max_results}
+  done
+  ;;
+
+"csv")
+  if [ -z $2 ]; then
+    print_command_usage $1 "projectIdOrKey"
+    exit
+  fi
+  servicedesk=$2
+  isLastPage=false
+  typeset -i pagination_index
+  pagination_index=0
+  printf "accountId,emailAddress,displayName,active\n"
+  while ! $(${isLastPage}); do
+    http_response=`curl -s -X GET --url "${ac_sd_url}servicedesk/${servicedesk}/customer?start=${pagination_index}&limit=${max_results}" -u "${ac_user}" -H "${h_a_json}" -H "${h_x_experimental}"`
+    isLastPage=`echo ${http_response} | jq '.isLastPage'`
+    echo ${http_response} | jq -r '.values[] | [ .accountId, .emailAddress, .displayName, .active ] | @csv'
+    pagination_index=${pagination_index}+${max_results}
+  done
+  ;;
+
+"count")
+ if [ -z $2 ]; then
+    print_command_usage $1 "projectIdOrKey"
+    exit
+  fi
+  servicedesk=$2
+  typeset -i customerCount
+  customerCount=`ajcSDCustomers csv ${servicedesk} | wc -l`
+  customerCount=${customerCount}-1
+  echo ${customerCount}
+esac

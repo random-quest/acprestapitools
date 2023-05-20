@@ -1,0 +1,106 @@
+#!/bin/zsh
+typeset -r ac_command=$1
+
+typeset -r ac_SITE_NAME=$(cat $HOME/conf/atlassian_cloud_site_name)
+
+typeset -r ac_user=$(cat $HOME/conf/atlassian_cloud_username):$(cat $HOME/conf/atlassian_cloud_token)
+typeset -r ac_AUTH=$(cat $HOME/conf/atlassian_cloud_username):$(cat $HOME/conf/atlassian_cloud_token)
+
+typeset -r ac_URL_SITE="https://${ac_SITE_NAME}.atlassian.net/"
+# Jira Cloud Platform URL
+typeset -r ac_url="https://${ac_SITE_NAME}.atlassian.net/rest/api/3/"
+typeset -r ac_URL_JIRA3="https://${ac_SITE_NAME}.atlassian.net/rest/api/3/"
+# Confluene Cloud URL
+typeset -r ac_wiki_url="https://${ac_SITE_NAME}.atlassian.net/wiki/api/v2/"
+typeset -r ac_URL_WIKI2="https://${ac_SITE_NAME}.atlassian.net/wiki/api/v2/"
+# JSM Cloud URL
+typeset -r ac_sd_url="https://${ac_SITE_NAME}.atlassian.net/rest/servicedeskapi/"
+typeset -r ac_URL_JSM="https://${ac_SITE_NAME}.atlassian.net/rest/servicedeskapi/"
+# HTTP header constants
+  # accept json
+typeset -r h_a_json="Accept: application/json"
+typeset -r acHA_JSON="Accept: application/json"
+  # content type json
+typeset -r h_ct_json="Content-Type: application/json"
+typeset -r acHCT_JSON="Content-Type: application/json"
+  # content type png
+typeset -r h_ct_png="Content-Type: image/png"
+typeset -r acHCT_PNG="Content-Type: image/png"
+  # x-atlassian 
+typeset -r h_xat_nocheck="X-Atlassian-Token: no-check"
+typeset -r acHAT_NOC="X-Atlassian-Token: no-check"
+  # x-experimental
+typeset -r h_x_experimental="X-ExperimentalApi: opt-in"
+typeset -r acHEX_OPT="X-ExperimentalApi: opt-in"
+# timestamps
+  # date
+typeset -r timestampDateOnly="`date +%Y-%m-%d`"
+typeset -r ac_TS_DATE="`date +%Y-%m-%d`"
+  # time
+typeset -r timestampTimeOnly="`date +%H-%M-%S`"
+typeset -r ac_TS_TIME="`date +%H-%M-%S`"
+  # dateTtime
+typeset -r date_time_stamp="`date +%Y-%m-%dT%H-%M-%S`"
+typeset -r ac_TS_DATETIME="`date +%Y-%m-%dT%H-%M-%S`"
+
+# Paging Limits
+typeset -Ar ac_LIM=([Min]=1 [Max]=250)
+
+# Confluence Cloud Constants
+typeset -Ar acc_SPACE_STATUS=([current]="&status=current" [archived]="&status=archived" [all]="")
+typeset -Ar acc_SPACE_TYPE=([global]="&type=global" [personal]="&type=personal" [all]="")
+typeset -Ar acc_SPACE_AVAILABLE_KEYS=([id]="id" [key]="key" [name]="name" [type]="type" [status]="status" [homepageId]="homepageId" [description]="description")
+typeset -Ar acc_PAGE_STATUS=([current]="" [trashed]="" [historical]="" [deleted]="" [any]="" [draft]="" [archived]="")
+typeset -Ar acc_PAGE_BODYFORMAT=([storage]="" [atlas_doc_format]="")
+typeset -Ar acc_PAGE_AVAILABLE_KEYS=([id]="id" [status]="status" [title]="title" [spaceId]="spaceId" [parentId]="parentId" [authorId]="authorId" [createdAt]="createdAt")
+typeset -Ar acc_LABEL_PREFIX=([my]="" [team]="" [global]="" [system]="")
+typeset -Ar acc_LABEL_AVAILABLE_KEYS=([id]="id" [name]="name" [prefix]="prefix")
+
+function ac_get_simple() {
+  printf "curl -s -X GET --url \"%s%s\" -u %s -H %s" ${ac_url} $1 ${ac_user} ${h_a_json}
+}
+
+function ac_HTTP_PARSE() {
+  ac_HTTP_RETURN_CODE=`echo $1 | grep "^HTTP" | awk '{print $2}'`
+  acc_link "`echo $1 | grep "^link"`"
+  acc_link_rel "`echo $1 | grep "^link"`"
+  ac_JSON_STRING=`echo $1 | sed -ne '/^{/,$ p' | tr -d '\n' | tr -d '\r' | tr -d '\t'`
+}
+function acc_link() {
+  ac_ACC_LINK=`echo $1 | awk -F ';' '{print $1}' | awk '{print $2}' | sed "s/[<>]//g"`
+}
+function acc_link_rel() {
+  ac_ACC_LINK_REL=`echo $1 | awk '{print $3}' | awk -F '=' '{print $2}' | sed "s/\"//g" | tr -d '\n' | tr -d '\r'`
+}
+
+function print_command_usage() {
+  printf "Usage:\n  %s " ${ac_command}
+  echo $*
+  printf "\n"
+} 
+
+function is_keyword_valid() {
+user_keyword=$1
+shift
+for a in $*; do
+  if [[ $a == $user_keyword ]]
+  then
+    return 0
+  fi
+done
+printf "Usage:\n  %s (" ${ac_command}
+printf "$1"; shift
+for a in $*; do
+  printf " | %s" $a
+done
+printf ")\n"
+return 2
+}
+
+if [[ $1 = "env" ]]; then
+  printf "JSW URL: %s\n" ${ac_url}
+  printf "JSM URL: %s\n" ${ac_sd_url}
+  printf "CNF URL: %s\n" ${ac_wiki_url}
+  printf "Account: %s\n" $(cat $HOME/conf/atlassian_cloud_username)
+fi
+

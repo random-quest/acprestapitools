@@ -1,0 +1,99 @@
+#!/bin/zsh
+# based on https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-priorities/#api-group-issue-priorities
+source ac_lib `basename $0`
+typeset -A commandUsages
+commandUsages=([count]="%s:\t\tcounts the number of projects for this site.\n\t\tArguments: (live | archived | trashed | all)\n")
+commandUsages+=([get]="%s:\tFix legacy formatted descriptions.\n\t\tArguments: none.\n")
+commandUsages+=([countIssues]="%s:\tcounts the number of issues.\n\t\tArguments: [-c] [-a] [projectKey]\n\t\t-c\tDisplay a grand total.\n\t\t-a\tCount issues for all projects.\n")
+commandUsages+=([fixDescriptions]="%s:\tFix legacy formatted descriptions.\n\t\tArguments: none.\n")
+
+
+integer -r maxResults=50
+integer recordCount
+integer numPages
+
+# walk(if type == "string" then gsub("[\\n\\t]"; " ") else . end)
+function count() {
+  recordCount=`curl -s -X GET --url "${ac_url}priority/search" -u "${ac_user}" -H "${h_a_json}" | jq '.total'`
+  numPages=${recordCount}/${maxResults}
+}
+
+function getValueByKey() {
+  count
+  integer local_startIndex
+  integer local_pageCounter
+  for local_pageCounter in {0..$numPages}; do
+    local_startIndex=${local_pageCounter}*${maxResults}
+    curl -s -X GET --url "${ac_url}priority/search?startAt=${local_startIndex}&maxResults=${maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r --arg e $1 '.values[][$e]' | sort
+  done
+}
+
+case $1 in
+"count")
+  count
+  printf "%u\n" ${recordCount}
+  ;;
+"get")
+  if [ -z $2 ]; then
+    print_command_usage $1 "(id | name | iconUrl | description | statusColor | self)"
+    exit
+  fi
+  getValueByKey $2
+  ;;
+"csv")
+  count
+  for pageCounter in {0..$numPages}; do
+    integer startIndex=${pageCounter}*${maxResults}
+    curl -s -X GET --url "${ac_url}priority/search?startAt=${startIndex}&maxResults=${maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[] | [ .id, .name, .description ] | @csv'
+  done
+  ;;
+"json")
+  count
+  for pageCounter in {1..$numPages}; do
+    integer startIndex=${pageCounter}*${maxResults}
+    curl -s -X GET --url "${ac_url}priority/search?startAt=${startIndex}&maxResults=${maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq '.values[]' 
+  done
+  ;;
+"delete")
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-priorities/#api-rest-api-3-priority-id-delete
+  typeset -r deleteLogFile="ajcPriorities_DeleteLog_${timestampDateOnly}T${timestampTimeOnly}.csv"
+  if [ -z $2 ]; then
+    print_command_usage $1 "(priorityId | X)"
+    exit
+  fi
+  typeset -a priorityIds
+  if [[ ${2:u} == "X" ]]; then
+    priorityIds=(`getValueByKey id`)
+  else
+    priorityIds=$2
+  fi
+  for priorityId in ${priorityIds}; do
+    printf "%u," ${priorityId} | tee -a ${deleteLogFile}
+    http_response=`curl -i -s -X DELETE --url "${ac_url}priority/${priorityId}" --user "${ac_user}"`
+    http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
+    if [ $http_return_code -eq 303 ]; then
+      printf "deleted\n" | tee -a ${deleteLogFile}
+      continue
+    fi
+    if [ $http_return_code -ge 400 ]; then
+      json_error_response=`echo $http_response | grep "{\"errorMessage"`
+      printf "%u-%s\n" $http_return_code ${json_error_response} | tee -a ${deleteLogFile}
+      continue
+    fi
+  done
+  ;;
+"fixDescriptions")
+  typeset -a priorityIds=(`getValueByKey id`)
+  for priorityId in ${priorityIds}; do
+    fixedDescription=`curl -s -X GET --url "${ac_url}priority/${priorityId}" -u "${ac_user}" -H "${h_a_json}" | jq -r '(.description|gsub("\n"; " "))'`
+    http_response=`curl -i -s -X PUT --url "${ac_url}priority/${priorityId}" -u "${ac_user}" -H "${h_a_json}" -H "${h_ct_json}" --data "$(jq -n --arg desc ${fixedDescription} '{ "description": $desc }')"`
+    http_return_code=`echo ${http_response} | grep "^HTTP" | awk '{print $2}'`
+    if [ ${http_return_code} -eq 204 ]; then
+      json_error_response=`echo ${http_response} | grep "^{"`
+      printf "%u,\"Description updated\"\n" ${priorityId}
+    else
+      printf "%u,%u-%s\n" ${priorityId} ${http_return_code} ${json_error_response}
+    fi
+  done
+  ;;
+esac

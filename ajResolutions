@@ -1,0 +1,72 @@
+#!/bin/zsh
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-resolutions/#api-rest-api-3-resolution-search-get
+source ac_lib `basename $0`
+declare -a available_keywords=("count" "jsonObjectKeys" "csv" "json" "delete" "help")
+if [[ -z $1 ]]; then; user_keyword="hugo"; else; user_keyword=$1; fi
+if ! is_keyword_valid ${user_keyword} ${available_keywords[@]}; then; exit 0; fi
+integer -r G_maxResults=50
+integer G_count
+integer G_numPages
+
+function count() {
+  typeset -r json_response=`curl -s -X GET --url "${ac_url}resolution/search" -u "${ac_user}" -H "${h_a_json}" | jq`
+  G_count=`echo ${json_response} | jq '.total'`
+  G_numPages=${G_count}/${G_maxResults}
+}
+
+case $1 in
+"count")
+  count
+  printf "%u\n" ${G_count}
+  ;;
+
+"jsonObjectKeys")
+  curl -s -X GET --url "${ac_url}resolution/search" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[0] | keys_unsorted | .[]' | awk 'BEGIN {print "Root keys:"}; {print "  " $1}'
+  ;;
+
+"csv")
+  count
+  printf "id,name,description,isDefault\n"
+  for page in `seq 0 ${G_numPages}`; do
+    integer startIndex=${page}*${G_maxResults}
+    curl -s -X GET --url "${ac_url}resolution/search?startAt=${startIndex}&maxResults=${G_maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[] | [ (.id|tonumber), .name, .description[0:80], .isDefault ] | @csv'
+  done  
+  ;;
+
+"json")
+  count
+  for page in `seq 0 ${G_numPages}`; do
+    integer startIndex=${page}*${G_maxResults}
+    curl -s -X GET --url "${ac_url}resolution/search?startAt=${startIndex}&maxResults=${G_maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq '.values[]'
+  done
+  ;;
+
+"delete")
+# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-resolutions/#api-rest-api-3-resolution-id-delete
+ typeset -r deleteLogFile="ajcResolution_DeleteLog_${timestampDateOnly}T${timestampTimeOnly}.csv"
+  if [ -z $2 ]; then
+    print_command_usage $1 "resolutionId"
+    exit
+  fi
+  if [[ $2 =~ '^[0-9]+$' ]]; then
+    resolutionId=$2
+  else
+    print_command_usage $1 "resolutionId must be a number!"
+    exit
+  fi
+  printf "%u," ${resolutionId} | tee -a ${deleteLogFile}
+  http_response=`curl -i -s -X DELETE --url "${ac_url}resolution/${resolutionId}" --user "${ac_user}"`
+  http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
+  if [ $http_return_code -eq 204 ]; then
+    printf "deleted\n" | tee -a ${deleteLogFile}
+  fi
+  if [ $http_return_code -ge 400 ]; then
+    json_error_response=`echo $http_response | grep -E "{\"errorMessage"`
+    printf "%u-%s\n" $http_return_code ${json_error_response} | tee -a ${deleteLogFile}
+  fi
+  ;;
+
+"help")
+  printf "no help yet, lol\n"
+  ;;
+esac

@@ -1,0 +1,29 @@
+#!/bin/zsh
+# based on https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-announcement-banner/#api-group-announcement-banner
+source ac_lib `basename $0`
+declare -a available_keywords=("get" "set" "reset")
+if [[ -z $1 ]]; then; user_keyword="hugo"; else; user_keyword=$1; fi
+if ! is_keyword_valid ${user_keyword} ${available_keywords[@]}; then; exit 0; fi
+
+case $1 in
+"get")
+  eval $(ac_get_simple announcementBanner) | jq
+  ;;
+
+"set")
+  curl -s -X PUT --url "${ac_url}announcementBanner" -u ${ac_user} -H ${h_a_json} -H ${h_ct_json} --data "$(jq -n --arg p "$2" '{
+    "visibility": "public",
+    "isEnabled": true,
+    "isDismissible": false,
+    "message": $p }')" | grep -E "^HTTP" | awk '{print "Response Code:", $2}'
+  ;;
+
+"reset")
+  curl -i -s -X PUT --url "${ac_url}announcementBanner" -u ${ac_user} -H ${h_a_json} -H ${h_ct_json} --data "$(jq -n --arg p "$2" '{
+    "visibility": "private",
+    "isEnabled": false,
+    "isDismissible": false,
+    "message": "" }')" | grep -E "^HTTP" | awk '{print "Response Code:", $2}'
+  ;;
+esac
+

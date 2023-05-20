@@ -1,0 +1,15 @@
+{
+    "folders":
+    [
+        {
+            "path": ".",
+            "name": "acprestapitools",
+            "file_include_patterns": ["acp*","ac*","aj*","README.md"],
+            "file_exclude_patterns": ["*sublime-project"],
+        }
+    ],
+    "settings":
+    {
+        "tab_size": 2,
+    },
+}
