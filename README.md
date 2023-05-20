@@ -10,6 +10,4 @@ Atlassian Cloud Platform REST API tools
 | `GNU sed` | Not sure if, and why we need specific GNU sed features. #FIXME |
 
 ## Backlog
-### List all project permissions for a user. 
-source https://community.atlassian.com/t5/Jira-questions/How-can-I-check-users-projects-permissions-in-new-Jira-cloud/qaq-p/988221
-### make an overview page listing all cloud spaces and their space admins
+https://github.com/random-quest/acprestapitools/issues?q=is%3Aopen+is%3Aissue+label%3Aenhancement
