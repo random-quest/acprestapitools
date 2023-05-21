@@ -1,10 +1,16 @@
 #!/bin/zsh
-typeset -r ac_command=$1
+typeset -r acp_subCommand=$1
 
-typeset -r ac_SITE_NAME=$(cat $HOME/conf/atlassian_cloud_site_name)
+typeset -r acp_tools_app_name="acprestapitools"
+typeset -r acp_tools_configuration_dir="$HOME/.$acp_tools_app_name/"
+typeset -r acp_tools_active_site_file="$acp_tools_configuration_dir/acp_active_site"
+typeset -r acp_tools_available_sites_file="$acp_tools_configuration_dir/acp_available_sites"
 
-typeset -r ac_user=$(cat $HOME/conf/atlassian_cloud_username):$(cat $HOME/conf/atlassian_cloud_token)
-typeset -r ac_AUTH=$(cat $HOME/conf/atlassian_cloud_username):$(cat $HOME/conf/atlassian_cloud_token)
+typeset -r acp_SITE_NAME=$(cat $acp_tools_active_site_file)
+
+typeset -r ac_AUTH=$(cat $acp_tools_configuration_dir/acp_username):$(cat $acp_tools_configuration_dir/acp_token)
+# FIXME deprecated
+typeset -r ac_user="${ac_AUTH}"
 
 typeset -r ac_URL_SITE="https://${ac_SITE_NAME}.atlassian.net/"
 # Jira Cloud Platform URL
@@ -60,17 +66,17 @@ function ac_get_simple() {
   printf "curl -s -X GET --url \"%s%s\" -u %s -H %s" ${ac_url} $1 ${ac_user} ${h_a_json}
 }
 
-function ac_HTTP_PARSE() {
-  ac_HTTP_RETURN_CODE=`echo $1 | grep "^HTTP" | awk '{print $2}'`
-  acc_link "`echo $1 | grep "^link"`"
-  acc_link_rel "`echo $1 | grep "^link"`"
-  ac_JSON_STRING=`echo $1 | sed -ne '/^{/,$ p' | tr -d '\n' | tr -d '\r' | tr -d '\t'`
+function acp_HTTP_PARSE() {
+  acp_HTTP_RETURN_CODE=`echo $1 | grep "^HTTP" | awk '{print $2}'`
+  acp_link "`echo $1 | grep "^link"`"
+  acp_link_rel "`echo $1 | grep "^link"`"
+  acp_JSON_STRING=`echo $1 | sed -ne '/^{/,$ p' | tr -d '\n' | tr -d '\r' | tr -d '\t'`
 }
-function acc_link() {
-  ac_ACC_LINK=`echo $1 | awk -F ';' '{print $1}' | awk '{print $2}' | sed "s/[<>]//g"`
+function acp_link() {
+  acp_ACC_LINK=`echo $1 | awk -F ';' '{print $1}' | awk '{print $2}' | sed "s/[<>]//g"`
 }
-function acc_link_rel() {
-  ac_ACC_LINK_REL=`echo $1 | awk '{print $3}' | awk -F '=' '{print $2}' | sed "s/\"//g" | tr -d '\n' | tr -d '\r'`
+function acp_link_rel() {
+  acp_ACC_LINK_REL=`echo $1 | awk '{print $3}' | awk -F '=' '{print $2}' | sed "s/\"//g" | tr -d '\n' | tr -d '\r'`
 }
 
 function print_command_usage() {
