@@ -16,8 +16,12 @@ case $1 in
       printf "%s,%s," $sitename "Error" 
       if [ $acp_HTTP_RETURN_CODE -eq 401 ]; then
         printf "%s," "Unauthorized" 
-      else
-        printf "%s," $acp_HTTP_RETURN_CODE
+      else 
+        if [ $acp_HTTP_RETURN_CODE -eq 503 ]; then
+          printf "%s," "Deactivated?" 
+        else 
+          printf "%s," $acp_HTTP_RETURN_CODE
+        fi
       fi
       printf ",,\n"
       continue
