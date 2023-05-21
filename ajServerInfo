@@ -1,6 +1,7 @@
 #!/bin/zsh
 # https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-server-info/#api-group-server-info
-source ac_lib `basename $0`
+#
+source acp_lib `basename $0`
 typeset -A commandUsages
 commandUsages+=([json]="%s:\t\texports serverInfo for available sites in json format.\n\t\tArguments: none\n")
 commandUsages+=([csv]="%s:\t\texports serverInfo for available sites in csv format.\n\t\tArguments: none\n")
