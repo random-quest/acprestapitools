@@ -5,11 +5,11 @@
 # Dashboards shared with a private project that the user can browse. Not returned for anonymous users.
 # Dashboards shared with a public project.
 # Dashboards shared with the public.
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 
 expandParam="description,owner,viewUrl,favourite,favouritedCount,sharePermissions,editPermissions,isWritable"
 function getAvailableKeys() {
-  typeset local_availableKeysArray=(`curl -s -X GET --url "${ac_url}dashboard/search?status=active&expand=${expandParam}" -u "${ac_user}" -H  "${h_a_json}" | jq -r '.values[0] | keys_unsorted | .[]'`)
+  typeset local_availableKeysArray=(`curl -s -X GET --url "${acp_URL_JIRA3}dashboard/search?status=active&expand=${expandParam}" -u "${acp_AUTH}" -H  "${acp_HA_JSON}" | jq -r '.values[0] | keys_unsorted | .[]'`)
   stringOfAvailableKeys=$(printf "(%s)" ${(j: | :)local_availableKeysArray})
 }
 getAvailableKeys
@@ -31,7 +31,7 @@ function getNameById() {
     printf "getNameById() requires parameter dashboardId\n"
     return 1
   fi
-  typeset local_http_response=`curl -i -s -X GET --url "${ac_url}dashboard/${1}" -u "${ac_user}" -H "${h_a_json}"`
+  typeset local_http_response=`curl -i -s -X GET --url "${acp_URL_JIRA3}dashboard/${1}" -u "${acp_AUTH}" -H "${acp_HA_JSON}"`
   integer local_http_return_code=`echo ${local_http_response} | grep -E "^HTTP" | awk '{print $2}'`
   if [ ${local_http_return_code} -eq 200 ]; then
     echo ${local_http_response} | grep -E "^{" | jq '.name'
@@ -65,7 +65,7 @@ function getValueByKey() {
     integer local_pageCounter
     for local_pageCounter in {0..$numPages}; do
       local_startIndex=${local_pageCounter}*${maxResults}
-      curl -s -X GET --url "${ac_url}dashboard/search?startAt=${local_startIndex}&maxResults=${maxResults}&${local_queryParameterStatus}&expand=${expandParam}" -u "${ac_user}" -H "${h_a_json}" | jq -r --arg key $1 '.values[][$key]' | sort
+      curl -s -X GET --url "${acp_URL_JIRA3}dashboard/search?startAt=${local_startIndex}&maxResults=${maxResults}&${local_queryParameterStatus}&expand=${expandParam}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r --arg key $1 '.values[][$key]' | sort
     done
   else
     if [ -z $1 ]; then
@@ -91,7 +91,7 @@ function count() {
       local_queryParameterStatus="status=deleted"
       ;;
     esac
-    recordCount=`curl -s -X GET --url "${ac_url}dashboard/search?${local_queryParameterStatus}" -u "${ac_user}" -H "${h_a_json}" | jq '.total'`
+    recordCount=`curl -s -X GET --url "${acp_URL_JIRA3}dashboard/search?${local_queryParameterStatus}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq '.total'`
     numPages=${recordCount}/${maxResults}
   else
     prinf "count() needs the \"status\" parameter\n"
@@ -104,7 +104,7 @@ function isExistsDashboardId() {
     # return not found
     return 1
   fi
-  typeset local_http_response=`curl -i -s -X GET --url "${ac_url}dashboard/${1}" -u "${ac_user}" -H "${h_a_json}"`
+  typeset local_http_response=`curl -i -s -X GET --url "${acp_URL_JIRA3}dashboard/${1}" -u "${acp_AUTH}" -H "${acp_HA_JSON}"`
   integer local_http_return_code=`echo ${local_http_response} | grep "^HTTP" | awk '{print $2}'`
   if [ ${local_http_return_code} -eq 200 ]; then
     # return exists
@@ -188,7 +188,7 @@ case ${1:l} in
   integer pageCounter
   for pageCounter in {0..$numPages}; do
     startIndex=${pageCounter}*${maxResults}
-    curl -s -X GET --url "${ac_url}dashboard/search?startAt=${startIndex}&maxResults=${maxResults}&status=${2}&expand=${expandParam}" -u "${ac_user}" -H "${h_a_json}" | jq '.values[]'
+    curl -s -X GET --url "${acp_URL_JIRA3}dashboard/search?startAt=${startIndex}&maxResults=${maxResults}&status=${2}&expand=${expandParam}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq '.values[]'
   done
   ;;
 
@@ -215,8 +215,8 @@ case ${1:l} in
     integer pageCounter
     for pageCounter in {0..$numPages}; do
       startIndex=${pageCounter}*${maxResults}
-      curl -s -X GET --url "${ac_url}dashboard/search?startAt=${startIndex}&maxResults=${maxResults}&status=${dashboardStatus}&expand=${expandParam}" \
-        -u "${ac_user}" -H "${h_a_json}" | \
+      curl -s -X GET --url "${acp_URL_JIRA3}dashboard/search?startAt=${startIndex}&maxResults=${maxResults}&status=${dashboardStatus}&expand=${expandParam}" \
+        -u "${acp_AUTH}" -H "${acp_HA_JSON}" | \
         jq -r --arg dashboardStatus ${dashboardStatus} '[.values[]] | sort_by(.name) | .[] | [ $dashboardStatus, (.id|tonumber), .name, .description, .owner.displayName, 
         (
           [
@@ -240,13 +240,13 @@ case ${1:l} in
   case $2 in
   "json")
     for dashboardId in `getValueByKey id "active"`; do
-      curl -s -X GET --url "${ac_url}dashboard/${dashboardId}/gadget" | jq
+      curl -s -X GET --url "${acp_URL_JIRA3}dashboard/${dashboardId}/gadget" | jq
     done
     ;;
   "csv")
     printf "dashboardId,id,title\n"
     for dashboardId in `getValueByKey id "active"`; do
-      http_response=`curl -i -s -X GET --url "${ac_url}dashboard/${dashboardId}/gadget"`
+      http_response=`curl -i -s -X GET --url "${acp_URL_JIRA3}dashboard/${dashboardId}/gadget"`
       http_return_code=`echo ${http_response} | grep -E "^HTTP"  | awk '{print $2}'`
       if [ ${http_return_code} -eq 200 ]; then
         echo ${http_response} | grep -E "^{" | \
@@ -288,7 +288,7 @@ case ${1:l} in
   done
 
   for projectIdOrKey in ${projectsArray}; do
-    http_response=`curl -i -s -X POST --url "${ac_url}project/${projectIdOrKey}/archive" -u "${ac_user}" -H "${h_a_json}`
+    http_response=`curl -i -s -X POST --url "${acp_URL_JIRA3}project/${projectIdOrKey}/archive" -u "${acp_AUTH}" -H "${acp_HA_JSON}`
     http_return_code=`echo $http_response | grep "^HTTP" | awk '{print $2}'`
     if [ $http_return_code -eq 203 ]; then
       printf "%s,archived\n" ${projectIdOrKey}
@@ -328,7 +328,7 @@ case ${1:l} in
   done
 
   for projectIdOrKey in ${projectsArray}; do
-    http_response=`curl -i -s -X POST --url "${ac_url}project/${projectIdOrKey}/restore" -u "${ac_user}" -H "${h_a_json}`
+    http_response=`curl -i -s -X POST --url "${acp_URL_JIRA3}project/${projectIdOrKey}/restore" -u "${acp_AUTH}" -H "${acp_HA_JSON}`
     http_return_code=`echo $http_response | grep "^HTTP" | awk '{print $2}'`
     if [ $http_return_code -eq 200   ]; then
       printf "%s,restored\n" ${projectIdOrKey}
@@ -357,7 +357,7 @@ case ${1:l} in
   done
   shift $((OPTIND-1))
 
-  typeset -r deleteLogFile="ajcDashboards_DeleteLog_${timestampDateOnly}T${timestampTimeOnly}.csv"
+  typeset -r deleteLogFile="ajcDashboards_DeleteLog_${acp_TS_DATE}T${acp_TS_TIME}.csv"
   typeset -a dashboardIds
   if [[ ${option_DeleteAllDashboards} == "true" ]]; then
     dashboardIds=(`getValueByKey id "active"`)
@@ -381,7 +381,7 @@ case ${1:l} in
   for dashboardId in ${dashboardIds}; do
     dashboardName=`getNameById ${dashboardId}`
     printf "%u,%s," ${dashboardId} ${dashboardName} | tee -a ${deleteLogFile}
-    http_response=`curl -i -s -X DELETE --url "${ac_url}dashboard/${dashboardId}" -u "${ac_user}"`
+    http_response=`curl -i -s -X DELETE --url "${acp_URL_JIRA3}dashboard/${dashboardId}" -u "${acp_AUTH}"`
     http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
     if [ $http_return_code -eq 204 ]; then
       printf "deleted\n" | tee -a ${deleteLogFile}

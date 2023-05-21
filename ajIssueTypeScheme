@@ -1,12 +1,12 @@
 #!/bin/zsh
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 declare -a available_keywords=("count" "getids" "csv" "delete")
 if [[ -z $1 ]]; then; user_keyword="hugo"; else; user_keyword=$1; fi
 if ! is_keyword_valid ${user_keyword} ${available_keywords[@]}; then; exit 0; fi
 
 getids()
 {
-curl -s -X GET --url "${ac_url}issuetypescheme" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[] | select(.id|tonumber != 10000).id'
+curl -s -X GET --url "${acp_URL_JIRA3}issuetypescheme" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.values[] | select(.id|tonumber != 10000).id'
 }
 
 case $1 in
@@ -17,11 +17,11 @@ case $1 in
   getids
   ;;
 "csv")
-  curl -s -X GET --url "${ac_url}issuetypescheme" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[] | [ .id, .name, .description ] | @csv'
+  curl -s -X GET --url "${acp_URL_JIRA3}issuetypescheme" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.values[] | [ .id, .name, .description ] | @csv'
   ;;
 "delete")
 # https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-type-schemes/#api-rest-api-3-issuetypescheme-issuetypeschemeid-delete
-  typeset -r deleteLogFile="ajcITS_DeleteLog_${timestampDateOnly}T${timestampTimeOnly}.csv"
+  typeset -r deleteLogFile="ajcITS_DeleteLog_${acp_TS_DATE}T${acp_TS_TIME}.csv"
   if [ -z $2 ]; then
     print_command_usage $1 "(issueTypeSchemeId | X)"
     exit
@@ -34,7 +34,7 @@ case $1 in
   fi
   for issueTypeSchemeId in ${issueTypeSchemeIds}; do
     printf "%u," ${issueTypeSchemeId} | tee -a ${deleteLogFile}
-    http_response=`curl -i -s -X DELETE --url "${ac_url}issuetypescheme/${issueTypeSchemeId}" --user "${ac_user}"`
+    http_response=`curl -i -s -X DELETE --url "${acp_URL_JIRA3}issuetypescheme/${issueTypeSchemeId}" --user "${acp_AUTH}"`
     http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
     if [ $http_return_code -eq 204 ]; then
       printf "deleted\n" | tee -a ${deleteLogFile}

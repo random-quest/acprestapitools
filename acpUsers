@@ -1,6 +1,6 @@
 #!/bin/zsh
 
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 declare -a available_keywords=("help" "count" "get" "csv" "json" "getUserGroups" "csvUserGroups" "getAccountIdByDisplayName" "getDisplayNameByAccountId" "delete_all")
 if [[ -z $1 ]]; then; user_keyword="hugo"; else; user_keyword=$1; fi
 if ! is_keyword_valid ${user_keyword} ${available_keywords[@]}; then; exit 0; fi
@@ -11,7 +11,7 @@ declare -i total_results=0
 
 function count() {
 while : ; do
-  num_results=`curl -s -X GET --url "${ac_url}users/search?startAt=${total_results}&maxResults=${max_results}" -u ${ac_user} -H ${h_a_json} | jq '. | length'`
+  num_results=`curl -s -X GET --url "${acp_URL_JIRA3}users/search?startAt=${total_results}&maxResults=${max_results}" -u ${acp_AUTH} -H ${acp_HA_JSON} | jq '. | length'`
   total_results=total_results+num_results
   if [ $num_results -lt $max_results ]; then; break; fi
 done
@@ -22,7 +22,7 @@ count
 num_pages=$(($total_results/$max_results))
 user_element=$1
 for i in `seq 0 $num_pages`; do
-  curl -s -X GET --url "${ac_url}users/search?startAt=$(($i*${max_results}))&maxResults=${max_results}" -u "$ac_user" -H "$h_a_json" | jq -r --arg e $user_element '.[] | select(.accountType == "atlassian")[$e]'
+  curl -s -X GET --url "${acp_URL_JIRA3}users/search?startAt=$(($i*${max_results}))&maxResults=${max_results}" -u "$acp_AUTH" -H "$acp_HA_JSON" | jq -r --arg e $user_element '.[] | select(.accountType == "atlassian")[$e]'
 done
 }
 
@@ -53,7 +53,7 @@ case $1 in
     print_command_usage $1 "accountId"
     exit
   fi
-  result=`curl -s -X GET --url "${ac_url}user?accountId=${2}" -u "$ac_user" -H "$h_a_json" | jq -r '.displayName'`
+  result=`curl -s -X GET --url "${acp_URL_JIRA3}user?accountId=${2}" -u "$acp_AUTH" -H "$acp_HA_JSON" | jq -r '.displayName'`
   if [[ $result != "null" ]]; then
     echo $result
   fi
@@ -64,7 +64,7 @@ case $1 in
     print_command_usage $1 "accountId"
     exit
   else
-    curl -s -X GET --url "${ac_url}user/groups?accountId=$2" -u "$ac_user" -H "$h_a_json" | jq '.[].name'
+    curl -s -X GET --url "${acp_URL_JIRA3}user/groups?accountId=$2" -u "$acp_AUTH" -H "$acp_HA_JSON" | jq '.[].name'
   fi
   ;;
 
@@ -73,7 +73,7 @@ case $1 in
     print_command_usage $1 "accountId"
     exit
   else  
-    curl -s -X GET --url "${ac_url}user?accountId=${2}&expand=groups" -u "$ac_user" -H "$h_a_json" | jq -r --arg u $2 '.groups.items[] | [ $u, .groupId, .name ] | @csv'
+    curl -s -X GET --url "${acp_URL_JIRA3}user?accountId=${2}&expand=groups" -u "$acp_AUTH" -H "$acp_HA_JSON" | jq -r --arg u $2 '.groups.items[] | [ $u, .groupId, .name ] | @csv'
   fi
   ;;
 
@@ -82,7 +82,7 @@ case $1 in
   num_pages=$(($total_results/$max_results))
   printf "accountId,active,displayName,url\n"
   for i in `seq 0 $num_pages`; do
-    curl -s -X GET --url "${ac_url}users/search?startAt=$(($i*${max_results}))&maxResults=${max_results}" -u "$ac_user" -H "$h_a_json" | jq -r '.[] | select(.accountType == "atlassian") | [ .accountId, .active, .displayName, .self ] | @csv'
+    curl -s -X GET --url "${acp_URL_JIRA3}users/search?startAt=$(($i*${max_results}))&maxResults=${max_results}" -u "$acp_AUTH" -H "$acp_HA_JSON" | jq -r '.[] | select(.accountType == "atlassian") | [ .accountId, .active, .displayName, .self ] | @csv'
   done
   ;;
 
@@ -90,17 +90,17 @@ case $1 in
   count
   num_pages=$(($total_results/$max_results))
   for i in `seq 0 $num_pages`; do
-    curl -s -X GET --url "${ac_url}users/search?startAt=$(($i*${max_results}))&maxResults=${max_results}" -u "$ac_user" -H "$h_a_json" | jq '.[] | select(.accountType == "atlassian")'
+    curl -s -X GET --url "${acp_URL_JIRA3}users/search?startAt=$(($i*${max_results}))&maxResults=${max_results}" -u "$acp_AUTH" -H "$acp_HA_JSON" | jq '.[] | select(.accountType == "atlassian")'
   done
   ;;
 
 "delete_all")
   SELF=`basename $0 | awk -F '.' '{print $1}'`
-  echo "${timestampDateOnly} ${timestampTimeOnly}" >> $SELF.error.log
+  echo "${acp_TS_DATE} ${acp_TS_TIME}" >> $SELF.error.log
   for n in `getElement accountId`
   do
     echo -n "Deleting User $n..."
-    HTTP_RESPONSE=$(curl -i -s -X DELETE --url "${ac_url}user?accountId=$n" -u "$ac_user" | grep -E "^HTTP") 
+    HTTP_RESPONSE=$(curl -i -s -X DELETE --url "${acp_URL_JIRA3}user?accountId=$n" -u "$acp_AUTH" | grep -E "^HTTP") 
     HTTP_CODE=$(echo $HTTP_RESPONSE | grep "^HTTP" | awk '{print $2}')
     if [ 204 -eq $HTTP_CODE ]
     then

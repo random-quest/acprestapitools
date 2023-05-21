@@ -1,16 +1,16 @@
 #!/bin/zsh
 # 
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 declare -a available_keywords=("count" "jsonObjectKeys" "getIssueTypeIds" "csv" "json" "createAvatarsUpdateFile" "updateAvatarsFromFile")
 if [[ -z $1 ]]; then; user_keyword="hugo"; else; user_keyword=$1; fi
 if ! is_keyword_valid ${user_keyword} ${available_keywords[@]}; then; exit 0; fi
 
 function count() {
-  curl -s -X GET --url "${ac_url}issuetype" -u "${ac_user}" -H "${h_a_json}" | jq '. | length'
+  curl -s -X GET --url "${acp_URL_JIRA3}issuetype" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq '. | length'
 }
 
 function getIssueTypeIds() {
-  curl -s -X GET --url "${ac_url}issuetype" -u "${ac_user}" -H "${h_a_json}" | jq '[(.[].id|tonumber)] | sort | .[]'
+  curl -s -X GET --url "${acp_URL_JIRA3}issuetype" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq '[(.[].id|tonumber)] | sort | .[]'
 }
 
 case $1 in
@@ -18,21 +18,21 @@ case $1 in
   count
   ;;
 "jsonObjectKeys")
-  curl -s -X GET --url "${ac_url}issuetype" -u "${ac_user}" -H  "${h_a_json}" | jq -r '.[0] | keys_unsorted | .[]'
+  curl -s -X GET --url "${acp_URL_JIRA3}issuetype" -u "${acp_AUTH}" -H  "${acp_HA_JSON}" | jq -r '.[0] | keys_unsorted | .[]'
   ;;
 "getIssueTypeIds")
   getIssueTypeIds
   ;;
 "csv")
   printf "issueTypeId,name,untranslatedName,description,avatarId\n"
-  curl -s -X GET --url "${ac_url}issuetype" -u "${ac_user}" -H  "${h_a_json}" | jq -r '[.[]] | sort_by(.id) | .[] | [(.id|tonumber), .name, .untranslatedName, .description, .avatarId] | @csv'
+  curl -s -X GET --url "${acp_URL_JIRA3}issuetype" -u "${acp_AUTH}" -H  "${acp_HA_JSON}" | jq -r '[.[]] | sort_by(.id) | .[] | [(.id|tonumber), .name, .untranslatedName, .description, .avatarId] | @csv'
   ;;
 "json")
-  curl -s -X GET --url "${ac_url}issuetype" -u "${ac_user}" -H  "${h_a_json}" | jq '.[]'
+  curl -s -X GET --url "${acp_URL_JIRA3}issuetype" -u "${acp_AUTH}" -H  "${acp_HA_JSON}" | jq '.[]'
   ;;
 "createAvatarsUpdateFile")
   printf "issueTypeId,avatarId,issuetypeName\n"
-  curl -s -X GET --url "${ac_url}issuetype" -u "${ac_user}" -H "${h_a_json}" | jq -r '[.[]] | sort_by(.id) | .[] | [(.id|tonumber), .avatarId, .name] | @csv'
+  curl -s -X GET --url "${acp_URL_JIRA3}issuetype" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '[.[]] | sort_by(.id) | .[] | [(.id|tonumber), .avatarId, .name] | @csv'
   ;;
 "updateAvatarsFromFile")
   if [ ! -f $2 ]; then
@@ -42,7 +42,7 @@ case $1 in
   cat $2 | tail -n +2 | while read line; do
     issueTypeId=`echo $line | awk -F ',' '{print$1}'`
     avatarId=`echo $line | awk -F ',' '{print$2}'`
-    http_response=`curl -i -s -X PUT --url "${ac_url}issuetype/${issueTypeId}" -u "${ac_user}" -H "${h_a_json}" -H "${h_ct_json}" --data "$(jq -n --arg avatarId ${avatarId} '{"avatarId": $avatarId}')"`
+    http_response=`curl -i -s -X PUT --url "${acp_URL_JIRA3}issuetype/${issueTypeId}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" -H "${acp_HCT_JSON}" --data "$(jq -n --arg avatarId ${avatarId} '{"avatarId": $avatarId}')"`
     http_return_code=$(echo ${http_response} | grep "^HTTP" | awk '{print $2}')
     if [ 200 -eq ${http_return_code} ]
     then

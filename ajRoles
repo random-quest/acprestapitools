@@ -1,8 +1,8 @@
 #!/bin/zsh
 # based on https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-project-roles/#api-rest-api-3-role-get
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 function getAvailableKeys() {  
-  availableKeysArray=(`curl -s -X GET --url "${ac_url}role" -u "${ac_user}" -H "${h_a_json}" | jq -r '.[0] | keys_unsorted | .[]'`)
+  availableKeysArray=(`curl -s -X GET --url "${acp_URL_JIRA3}role" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.[0] | keys_unsorted | .[]'`)
   stringOfAvailableKeys=$(printf "(%s)" ${(j: | :)availableKeysArray})
 }
 getAvailableKeys
@@ -17,7 +17,7 @@ commandUsages+=([delete]="%s:\tdeletes roles.\n\t\tArguments: ( -a | <roleId> [<
 
 function getValuesByKey() {
   if [ ! -z $1 ]; then
-    curl -s -X GET --url "${ac_url}role" -u "${ac_user}" -H "${h_a_json}" | jq -r --arg key $1 '.[] | select(.name != "atlassian-addons-project-access")[$key]'
+    curl -s -X GET --url "${acp_URL_JIRA3}role" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r --arg key $1 '.[] | select(.name != "atlassian-addons-project-access")[$key]'
   else
     printf "getValuesByKey() needs \"key\" parameter\n"
   fi
@@ -25,7 +25,7 @@ function getValuesByKey() {
 
 case ${1:l} in
 "count")
-  curl -s -X GET --url "${ac_url}role" -u "${ac_user}" -H "${h_a_json}" | jq 'length - 1'
+  curl -s -X GET --url "${acp_URL_JIRA3}role" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq 'length - 1'
   ;;
 
 "valuesbykey")
@@ -43,12 +43,12 @@ case ${1:l} in
   ;;
 
 "json")
-     curl -s -X GET --url "${ac_url}role" -u "${ac_user}" -H "${h_a_json}" | jq '.[] | select(.name != "atlassian-addons-project-access")'
+     curl -s -X GET --url "${acp_URL_JIRA3}role" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq '.[] | select(.name != "atlassian-addons-project-access")'
      ;;
 
 "csv")
   printf "roleId,roleName,roleDescription\n"
-  curl -s -X GET --url "${ac_url}role" -u "${ac_user}" -H "${h_a_json}" | jq -r '.[] | select(.name != "atlassian-addons-project-access") | [ .id, .name, .description ] | @csv'
+  curl -s -X GET --url "${acp_URL_JIRA3}role" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.[] | select(.name != "atlassian-addons-project-access") | [ .id, .name, .description ] | @csv'
   ;;
 
 "delete")
@@ -65,7 +65,7 @@ case ${1:l} in
     done
     shift $((OPTIND-1))
 
-    typeset -r deleteLogFile="ajcRoles_DeleteLog_${timestampDateOnly}T${timestampTimeOnly}.csv"
+    typeset -r deleteLogFile="ajcRoles_DeleteLog_${acp_TS_DATE}T${acp_TS_TIME}.csv"
     typeset -a roleIds
     if [[ ${option_DeleteAll} == "true" ]]; then
       roleIds=(`getValuesByKey id`)
@@ -84,7 +84,7 @@ case ${1:l} in
 
     for roleId in ${roleIds}; do
       printf "%s," ${roleId} | tee -a ${deleteLogFile}
-      http_response=`curl -i -s -X DELETE --url "${ac_url}role/${roleId}" -u "${ac_user}"`
+      http_response=`curl -i -s -X DELETE --url "${acp_URL_JIRA3}role/${roleId}" -u "${acp_AUTH}"`
       http_return_code=`echo ${http_response} | grep "^HTTP" | awk '{print $2}'`
       if [ 204 -eq ${http_return_code} ]
       then

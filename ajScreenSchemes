@@ -1,12 +1,12 @@
 #!/bin/zsh
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 declare -a available_keywords=("count" "getids" "csv" "delete")
 if [[ -z $1 ]]; then; user_keyword="hugo"; else; user_keyword=$1; fi
 if ! is_keyword_valid ${user_keyword} ${available_keywords[@]}; then; exit 0; fi
 
 getids()
 {
-curl --silent --request GET --url "${ac_url}screenscheme?startAt=0&maxResults=100" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[] | select(.id != 1).id'
+curl --silent --request GET --url "${acp_URL_JIRA3}screenscheme?startAt=0&maxResults=100" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.values[] | select(.id != 1).id'
 }
 
 case $1 in
@@ -18,11 +18,11 @@ case $1 in
   ;;
 "csv")
   printf "id,name,description\n"
-  curl --silent --request GET --url "${ac_url}screenscheme?startAt=0&maxResults=100" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[] | [ .id, .name, .description ] | @csv'
+  curl --silent --request GET --url "${acp_URL_JIRA3}screenscheme?startAt=0&maxResults=100" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.values[] | [ .id, .name, .description ] | @csv'
   ;;
 "delete")
 # https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-screen-schemes/#api-rest-api-3-screenscheme-screenschemeid-delete
-  typeset -r deleteLogFile="ajcSS_DeleteLog_${timestampDateOnly}T${timestampTimeOnly}.csv"
+  typeset -r deleteLogFile="ajcSS_DeleteLog_${acp_TS_DATE}T${acp_TS_TIME}.csv"
   if [ -z $2 ]; then
     print_command_usage $1 "(screenSchemeId | X)"
     exit
@@ -35,7 +35,7 @@ case $1 in
   fi
   for screenSchemeId in ${screenSchemeIds}; do
     printf "%u," ${screenSchemeId} | tee -a ${deleteLogFile}
-    http_response=`curl -i -s -X DELETE --url "${ac_url}screenscheme/${screenSchemeId}" -u "${ac_user}"` 
+    http_response=`curl -i -s -X DELETE --url "${acp_URL_JIRA3}screenscheme/${screenSchemeId}" -u "${acp_AUTH}"` 
     http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
     if [ $http_return_code -eq 204 ]; then
       printf "deleted\n" | tee -a ${deleteLogFile}

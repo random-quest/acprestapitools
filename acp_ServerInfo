@@ -10,7 +10,7 @@ case $1 in
 "csv")
   printf "sitename,version,buildNumber,buildDate,title,locale\n"
   cat "$acp_tools_available_sites_file" | while read sitename; do
-    curl_command="$(printf "curl -i -s -X GET --url \"%s\" -u %s -H %s" "https://${sitename}.atlassian.net/rest/api/3/serverInfo" ${ac_user} ${h_a_json})"
+    curl_command="$(printf "curl -i -s -X GET --url \"%s\" -u %s -H %s" "https://${sitename}.atlassian.net/rest/api/3/serverInfo" ${acp_AUTH} ${acp_HA_JSON})"
     acp_HTTP_PARSE "`eval ${curl_command}`"
     if [ $acp_HTTP_RETURN_CODE -ne 200 ]; then
       printf "%s,%s," $sitename "Error" 
@@ -31,7 +31,7 @@ case $1 in
   ;;
 "json")
   cat "$HOME/conf/atlassian_cloud_available_site_names" | while read sitename; do
-    eval $(printf "curl -s -X GET --url \"%s\" -u %s -H %s" "https://${sitename}.atlassian.net/rest/api/3/serverInfo" ${ac_user} ${h_a_json}) | jq
+    eval $(printf "curl -s -X GET --url \"%s\" -u %s -H %s" "https://${sitename}.atlassian.net/rest/api/3/serverInfo" ${acp_AUTH} ${acp_HA_JSON}) | jq
   done
   ;;
 "help")

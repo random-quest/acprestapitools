@@ -1,5 +1,5 @@
 #!/bin/zsh
-typeset -r acp_subCommand=$1
+typeset -r acp_command=$1
 
 typeset -r acp_tools_app_name="acprestapitools"
 typeset -r acp_tools_configuration_dir="$HOME/.$acp_tools_app_name/"
@@ -8,62 +8,48 @@ typeset -r acp_tools_available_sites_file="$acp_tools_configuration_dir/acp_avai
 
 typeset -r acp_SITE_NAME=$(cat $acp_tools_active_site_file)
 
-typeset -r ac_AUTH=$(cat $acp_tools_configuration_dir/acp_username):$(cat $acp_tools_configuration_dir/acp_token)
-# FIXME deprecated
-typeset -r ac_user="${ac_AUTH}"
+# Atlassian Cloud Platform REST API base URLs
+typeset -r acp_URL_SITE="https://${acp_SITE_NAME}.atlassian.net/"
+typeset -r acp_URL_JIRA3="${acp_URL_SITE}rest/api/3/"
+typeset -r acp_URL_SD="${acp_URL_SITE}rest/servicedeskapi/"
+typeset -r acp_URL_WIKI2="${acp_URL_SITE}wiki/api/v2/"
 
-typeset -r ac_URL_SITE="https://${ac_SITE_NAME}.atlassian.net/"
-# Jira Cloud Platform URL
-typeset -r ac_url="https://${ac_SITE_NAME}.atlassian.net/rest/api/3/"
-typeset -r ac_URL_JIRA3="https://${ac_SITE_NAME}.atlassian.net/rest/api/3/"
-# Confluene Cloud URL
-typeset -r ac_wiki_url="https://${ac_SITE_NAME}.atlassian.net/wiki/api/v2/"
-typeset -r ac_URL_WIKI2="https://${ac_SITE_NAME}.atlassian.net/wiki/api/v2/"
-# JSM Cloud URL
-typeset -r ac_sd_url="https://${ac_SITE_NAME}.atlassian.net/rest/servicedeskapi/"
-typeset -r ac_URL_JSM="https://${ac_SITE_NAME}.atlassian.net/rest/servicedeskapi/"
+typeset -r acp_AUTH=$(cat $acp_tools_configuration_dir/acp_username):$(cat $acp_tools_configuration_dir/acp_token)
+
 # HTTP header constants
   # accept json
-typeset -r h_a_json="Accept: application/json"
-typeset -r acHA_JSON="Accept: application/json"
+typeset -r acp_HA_JSON="Accept: application/json"
   # content type json
-typeset -r h_ct_json="Content-Type: application/json"
-typeset -r acHCT_JSON="Content-Type: application/json"
+typeset -r acp_HCT_JSON="Content-Type: application/json"
   # content type png
-typeset -r h_ct_png="Content-Type: image/png"
-typeset -r acHCT_PNG="Content-Type: image/png"
+typeset -r acp_HCT_PNG="Content-Type: image/png"
   # x-atlassian 
-typeset -r h_xat_nocheck="X-Atlassian-Token: no-check"
-typeset -r acHAT_NOC="X-Atlassian-Token: no-check"
+typeset -r acp_HAT_NOC="X-Atlassian-Token: no-check"
   # x-experimental
-typeset -r h_x_experimental="X-ExperimentalApi: opt-in"
-typeset -r acHEX_OPT="X-ExperimentalApi: opt-in"
+typeset -r acp_HEX_OPT="X-ExperimentalApi: opt-in"
 # timestamps
   # date
-typeset -r timestampDateOnly="`date +%Y-%m-%d`"
-typeset -r ac_TS_DATE="`date +%Y-%m-%d`"
+typeset -r acp_TS_DATE="`date +%Y-%m-%d`"
   # time
-typeset -r timestampTimeOnly="`date +%H-%M-%S`"
-typeset -r ac_TS_TIME="`date +%H-%M-%S`"
+typeset -r acp_TS_TIME="`date +%H-%M-%S`"
   # dateTtime
-typeset -r date_time_stamp="`date +%Y-%m-%dT%H-%M-%S`"
-typeset -r ac_TS_DATETIME="`date +%Y-%m-%dT%H-%M-%S`"
+typeset -r acp_TS_DATETIME="`date +%Y-%m-%dT%H-%M-%S`"
 
 # Paging Limits
 typeset -Ar ac_LIM=([Min]=1 [Max]=250)
 
 # Confluence Cloud Constants
-typeset -Ar acc_SPACE_STATUS=([current]="&status=current" [archived]="&status=archived" [all]="")
-typeset -Ar acc_SPACE_TYPE=([global]="&type=global" [personal]="&type=personal" [all]="")
-typeset -Ar acc_SPACE_AVAILABLE_KEYS=([id]="id" [key]="key" [name]="name" [type]="type" [status]="status" [homepageId]="homepageId" [description]="description")
-typeset -Ar acc_PAGE_STATUS=([current]="" [trashed]="" [historical]="" [deleted]="" [any]="" [draft]="" [archived]="")
-typeset -Ar acc_PAGE_BODYFORMAT=([storage]="" [atlas_doc_format]="")
-typeset -Ar acc_PAGE_AVAILABLE_KEYS=([id]="id" [status]="status" [title]="title" [spaceId]="spaceId" [parentId]="parentId" [authorId]="authorId" [createdAt]="createdAt")
-typeset -Ar acc_LABEL_PREFIX=([my]="" [team]="" [global]="" [system]="")
-typeset -Ar acc_LABEL_AVAILABLE_KEYS=([id]="id" [name]="name" [prefix]="prefix")
+typeset -Ar acp_SPACE_STATUS=([current]="&status=current" [archived]="&status=archived" [all]="")
+typeset -Ar acp_SPACE_TYPE=([global]="&type=global" [personal]="&type=personal" [all]="")
+typeset -Ar acp_SPACE_AVAILABLE_KEYS=([id]="id" [key]="key" [name]="name" [type]="type" [status]="status" [homepageId]="homepageId" [description]="description")
+typeset -Ar acp_PAGE_STATUS=([current]="" [trashed]="" [historical]="" [deleted]="" [any]="" [draft]="" [archived]="")
+typeset -Ar acp_PAGE_BODYFORMAT=([storage]="" [atlas_doc_format]="")
+typeset -Ar acp_PAGE_AVAILABLE_KEYS=([id]="id" [status]="status" [title]="title" [spaceId]="spaceId" [parentId]="parentId" [authorId]="authorId" [createdAt]="createdAt")
+typeset -Ar acp_LABEL_PREFIX=([my]="" [team]="" [global]="" [system]="")
+typeset -Ar acp_LABEL_AVAILABLE_KEYS=([id]="id" [name]="name" [prefix]="prefix")
 
 function ac_get_simple() {
-  printf "curl -s -X GET --url \"%s%s\" -u %s -H %s" ${ac_url} $1 ${ac_user} ${h_a_json}
+  printf "curl -s -X GET --url \"%s%s\" -u %s -H %s" ${acp_URL_JIRA3} $1 ${acp_AUTH} ${acp_HA_JSON}
 }
 
 function acp_HTTP_PARSE() {
@@ -80,7 +66,7 @@ function acp_link_rel() {
 }
 
 function print_command_usage() {
-  printf "Usage:\n  %s " ${ac_command}
+  printf "Usage:\n  %s " ${acp_command}
   echo $*
   printf "\n"
 } 
@@ -94,7 +80,7 @@ for a in $*; do
     return 0
   fi
 done
-printf "Usage:\n  %s (" ${ac_command}
+printf "Usage:\n  %s (" ${acp_command}
 printf "$1"; shift
 for a in $*; do
   printf " | %s" $a
@@ -104,9 +90,9 @@ return 2
 }
 
 if [[ $1 = "env" ]]; then
-  printf "JSW URL: %s\n" ${ac_url}
-  printf "JSM URL: %s\n" ${ac_sd_url}
-  printf "CNF URL: %s\n" ${ac_wiki_url}
-  printf "Account: %s\n" $(cat $HOME/conf/atlassian_cloud_username)
+  printf "JSW URL: %s\n" ${acp_URL_JIRA3}
+  printf "JSM URL: %s\n" ${acp_URL_SD}
+  printf "CNF URL: %s\n" ${acp_URL_WIKI2}
+  printf "Account: %s\n" $(cat $acp_tools_configuration_dir/acp_username)
 fi
 

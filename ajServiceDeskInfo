@@ -1,5 +1,5 @@
 #!/bin/zsh
 # based on https://developer.atlassian.com/cloud/jira/service-desk/rest/api-group-info/#api-group-info
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 
-curl -s -X GET --url "${ac_sd_url}info" -u "${ac_user}" -H "${h_a_json}" | jq 
+curl -s -X GET --url "${acp_URL_SD}info" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq 

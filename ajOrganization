@@ -1,6 +1,6 @@
 #!/bin/zsh
 # based on https://developer.atlassian.com/cloud/jira/service-desk/rest/api-group-organization/#api-group-organization
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 declare -a available_keywords=("get" "create" "delete")
 if [[ -z $1 ]]; then; user_keyword="hugo"; else; user_keyword=$1; fi
 if ! is_keyword_valid ${user_keyword} ${available_keywords[@]}; then; exit 0; fi
@@ -13,9 +13,9 @@ case $1 in
     exit
   fi
   if [[ $2 == "X" ]]; then
-    curl -s -X GET --url "${ac_sd_url}organization" -u "${ac_user}" -H "${h_a_json}" | jq
+    curl -s -X GET --url "${acp_URL_SD}organization" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq
   else
-    curl -s -X GET --url "${ac_sd_url}organization/${2}" -u "${ac_user}" -H "${h_a_json}" | jq
+    curl -s -X GET --url "${acp_URL_SD}organization/${2}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq
   fi
   ;;
 
@@ -25,7 +25,7 @@ case $1 in
     exit
   fi
   organizationName=$2
-  http_response=`curl -i -s -X POST --url "${ac_sd_url}organization" -u "${ac_user}" -H "${h_a_json}" -H "${h_ct_json}" --data "$(jq -n --arg organizationName "${organizationName}" '{ "name": $organizationName }')"`
+  http_response=`curl -i -s -X POST --url "${acp_URL_SD}organization" -u "${acp_AUTH}" -H "${acp_HA_JSON}" -H "${acp_HCT_JSON}" --data "$(jq -n --arg organizationName "${organizationName}" '{ "name": $organizationName }')"`
   http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
   organizationId=`echo $http_response | grep -E "^{" | jq -r '.id'` 
   organizationName=`echo $http_response | grep -E "^{" | jq '.name'` 
@@ -44,7 +44,7 @@ case $1 in
     exit
   fi
   organizationId=$2
-  http_response=`curl -i -s -X DELETE --url "${ac_sd_url}organization/${organizationId}" -u "${ac_user}"`
+  http_response=`curl -i -s -X DELETE --url "${acp_URL_SD}organization/${organizationId}" -u "${acp_AUTH}"`
   http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
   printf "%u," ${organizationId}
   if [ 204 -eq $http_return_code ]; then

@@ -1,11 +1,11 @@
 #!/bin/zsh
 # https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-screens/#api-group-screens
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 integer -r maxResults=50
 integer recordCount
 integer numPages
 function getAvailableKeys() {
-  typeset local_availableKeysArray=(`curl -s -X GET --url "${ac_url}screens" -u "${ac_user}" -H  "${h_a_json}" | jq -r '.values[0] | keys_unsorted | .[]'`)
+  typeset local_availableKeysArray=(`curl -s -X GET --url "${acp_URL_JIRA3}screens" -u "${acp_AUTH}" -H  "${acp_HA_JSON}" | jq -r '.values[0] | keys_unsorted | .[]'`)
   stringOfAvailableKeys=$(printf "(%s)" ${(j: | :)local_availableKeysArray})
 }
 getAvailableKeys
@@ -19,7 +19,7 @@ commandUsages+=([delete]="%s:\t\tdelete screen(s)\n\t\tArguments: [-i <Id> n]\n\
 
 function count() {
   if [ ! -z $1 ]; then
-    recordCount=`curl -s -X GET --url "${ac_url}screens?maxResults=1&scope=$1" -u "${ac_user}" -H "${h_a_json}" | jq '.total'`
+    recordCount=`curl -s -X GET --url "${acp_URL_JIRA3}screens?maxResults=1&scope=$1" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq '.total'`
     numPages=${recordCount}/${maxResults}
   else
     printf "count() needs \"type\" parameter\n"
@@ -33,8 +33,8 @@ function getAllValuesForKey() {
     integer local_pageCounter
     for local_pageCounter in {0..$numPages}; do
       local_startIndex=${local_pageCounter}*${maxResults}
-      #curl -s -X GET --url "${ac_url}screens?startAt=${local_startIndex}&maxResults=${maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r --arg key $1 '.values[] | select(.id < 10000)[$key]'
-      curl -s -X GET --url "${ac_url}screens?startAt=${local_startIndex}&maxResults=${maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r --arg key $1 '.values[][$key]'
+      #curl -s -X GET --url "${acp_URL_JIRA3}screens?startAt=${local_startIndex}&maxResults=${maxResults}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r --arg key $1 '.values[] | select(.id < 10000)[$key]'
+      curl -s -X GET --url "${acp_URL_JIRA3}screens?startAt=${local_startIndex}&maxResults=${maxResults}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r --arg key $1 '.values[][$key]'
     done
   else
     printf "getAllValuesForKey() needs \"key\" parameter\n"
@@ -87,10 +87,10 @@ if [[ ${1:l} == "csv" || ${1:l} == "json" || ${1:l} == "count" ]]; then
     startIndex=${page}*${maxResults}
     case $subCommand in
       "csv")
-        curl -s -X GET --url "${ac_url}screens?startAt=${startIndex}&maxResults=${maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[] | [ .id, .name, .description ] | @csv' | sort
+        curl -s -X GET --url "${acp_URL_JIRA3}screens?startAt=${startIndex}&maxResults=${maxResults}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.values[] | [ .id, .name, .description ] | @csv' | sort
         ;;
       "json")
-        curl -s -X GET --url "${ac_url}screens?startAt=${startIndex}&maxResults=${maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[]'
+        curl -s -X GET --url "${acp_URL_JIRA3}screens?startAt=${startIndex}&maxResults=${maxResults}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.values[]'
         ;;
       esac
   done
@@ -135,7 +135,7 @@ case ${1:l} in
   # work multiple Keys and one or more IDs
   #
   for Id in ${option_IDs}; do
-    http_response=`curl -i -s -X GET --url "${ac_url}screens?id=${Id}" -u "$ac_user" -H "$h_a_json"`
+    http_response=`curl -i -s -X GET --url "${acp_URL_JIRA3}screens?id=${Id}" -u "$acp_AUTH" -H "$acp_HA_JSON"`
     http_return_code=`echo $http_response | grep "^HTTP" | awk '{print $2}'`
     http_json_string=`echo $http_response | grep "^{"`
     if [ $http_return_code -eq 200 ]; then
@@ -213,10 +213,10 @@ case ${1:l} in
   if [ ! -v option_Silent ]; then
     printf "id,name,result\n"
   fi
-  typeset -r LogFile="${ac_command}_${subCommand}_log_${timestampDateOnly}T${timestampTimeOnly}.tsv"
+  typeset -r LogFile="${acp_command}_${subCommand}_log_${acp_TS_DATE}T${acp_TS_TIME}.tsv"
   for Id Name in ${(kv)option_Array_Id_Name}; do
     printf "%u,%s" $Id $Name | tee -a ${LogFile}
-    http_response=`curl -i -s -X DELETE --url "${ac_url}screens/${Id}" -u "${ac_user}"` 
+    http_response=`curl -i -s -X DELETE --url "${acp_URL_JIRA3}screens/${Id}" -u "${acp_AUTH}"` 
     http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
     if [ $http_return_code -eq 204 ]; then
       printf "deleted\n" | tee -a ${LogFile}
@@ -236,7 +236,7 @@ case ${1:l} in
   done
   printf "%s - usage examples:\n" $(basename "$0")
   printf "  o) find duplicate custom fields\n"
-  printf "\t%s csv | xsv select name | sort | uniq -c | grep -v \"1 \"\n" $ac_command
+  printf "\t%s csv | xsv select name | sort | uniq -c | grep -v \"1 \"\n" $acp_command
   ;;
 
 *)

@@ -1,6 +1,6 @@
 #!/bin/zsh
 # https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-space/#api-group-space
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 integer -r ac_LIMIT=250
 typeset -A commandUsages
 commandUsages+=([count]="%s:\t\tcounts the number of pages.\n\t\tArguments: <pageId>\n")
@@ -10,15 +10,15 @@ commandUsages+=([csv]="%s:\t\tretrievs pages in csv format.\n\t\tArguments: <pag
 
 function getValueByKey() {
   if [ ! -z $1 -a ! -z $2 ]; then
-    ac_ACC_LINK="init"
-    ac_ACC_LINK_REL="next"
-    while [[ ! -z $ac_ACC_LINK && $ac_ACC_LINK_REL == "next" ]]; do
-      if [[ $ac_ACC_LINK == "init" ]]; then
-        ac_HTTP_PARSE "`curl -i -s -X GET --url "${ac_URL_WIKI2}pages/$1/attachments?limit=${ac_LIMIT}" -u "${ac_AUTH}" -H "${acHA_JSON}"`"
+    acp_ACC_LINK="init"
+    acp_ACC_LINK_REL="next"
+    while [[ ! -z $acp_ACC_LINK && $acp_ACC_LINK_REL == "next" ]]; do
+      if [[ $acp_ACC_LINK == "init" ]]; then
+        acp_HTTP_PARSE "`curl -i -s -X GET --url "${acp_URL_WIKI2}pages/$1/attachments?limit=${ac_LIMIT}" -u "${acp_AUTH}" -H "${acp_HA_JSON}"`"
       else
-        ac_HTTP_PARSE "`curl -i -s -X GET --url "${ac_URL_SITE}${ac_ACC_LINK}" -u "${ac_AUTH}" -H "${acHA_JSON}"`"
+        acp_HTTP_PARSE "`curl -i -s -X GET --url "${acp_URL_JIRA3_SITE}${acp_ACC_LINK}" -u "${acp_AUTH}" -H "${acp_HA_JSON}"`"
       fi
-      echo $ac_JSON_STRING | jq -r --arg e $2 '.results[][$e]'
+      echo $acp_JSON_STRING | jq -r --arg e $2 '.results[][$e]'
     done
   else
     printf "Function getValueByKey() is missing parameters.\n"
@@ -60,24 +60,24 @@ if [[ ${1:l} == "count" || ${1:l} == "json" || ${1:l} == "csv" ]]; then
   esac
   # Main loop
   for pageId in $option_pageIds; do
-    ac_ACC_LINK="init"
-    ac_ACC_LINK_REL="next"
-    while [ ! -z $ac_ACC_LINK ] && [[ $ac_ACC_LINK_REL == "next" ]]; do
-      if [[ $ac_ACC_LINK == "init" ]]; then
-        ac_HTTP_PARSE "`curl -i -s -X GET --url "${ac_URL_WIKI2}pages/$pageId/attachments?limit=${ac_LIMIT}" -u "${ac_AUTH}" -H "${acHA_JSON}"`"
+    acp_ACC_LINK="init"
+    acp_ACC_LINK_REL="next"
+    while [ ! -z $acp_ACC_LINK ] && [[ $acp_ACC_LINK_REL == "next" ]]; do
+      if [[ $acp_ACC_LINK == "init" ]]; then
+        acp_HTTP_PARSE "`curl -i -s -X GET --url "${acp_URL_WIKI2}pages/$pageId/attachments?limit=${ac_LIMIT}" -u "${acp_AUTH}" -H "${acp_HA_JSON}"`"
       else
-        ac_HTTP_PARSE "`curl -i -s -X GET --url "${ac_URL_SITE}${ac_ACC_LINK}" -u "${ac_AUTH}" -H "${acHA_JSON}"`"
+        acp_HTTP_PARSE "`curl -i -s -X GET --url "${acp_URL_JIRA3_SITE}${acp_ACC_LINK}" -u "${acp_AUTH}" -H "${acp_HA_JSON}"`"
       fi
       # Work cursor
       case $subCommand in
       "count")
-        recordCount+=`echo $ac_JSON_STRING | grep "^{" | jq -r '.results | length'`
+        recordCount+=`echo $acp_JSON_STRING | grep "^{" | jq -r '.results | length'`
         ;;
       "json")
-        echo $ac_JSON_STRING | jq '.results[]'
+        echo $acp_JSON_STRING | jq '.results[]'
         ;;
       "csv")
-        echo $ac_JSON_STRING | jq -r --arg pageId ${pageId} '.results[] | [ $pageId, .id, .status, .title, .mediaType, .comment, .fileSize, .webuiLink, .downloadLink ] | @csv'
+        echo $acp_JSON_STRING | jq -r --arg pageId ${pageId} '.results[] | [ $pageId, .id, .status, .title, .mediaType, .comment, .fileSize, .webuiLink, .downloadLink ] | @csv'
         ;;
       esac
     done
@@ -101,23 +101,22 @@ case ${1:l} in
   ;;
 
 "help")
-  printf "\nHelp for %s commands:\n\n" $(basename "$0")
+  printf "\nHelp for %s commands:\n\n" $acp_command
   for command commandUsage in ${(kv)commandUsages}; do
     printf ${commandUsage} ${command}
     printf "\n"
   done
-  printf "%s - usage examples:\n" $(basename "$0")
+  printf "%s - usage examples:\n" $acp_command
   printf "  o) Find top 50 biggest attachments\n"
-  printf "\taccPages csv > %s_all_pages_%s.csv\n" $ac_SITE_NAME $ac_TS_DATETIME
-  printf "\t%s csv -f %s_all_pages_%s.csv > %s_all_attachment_%s.csv\n" $ac_command $ac_SITE_NAME $ac_TS_DATETIME $ac_SITE_NAME $ac_TS_DATETIME
-  printf "\txsv index %s_all_attachment_%s.csv\n" $ac_SITE_NAME $ac_TS_DATETIME
-  printf "\tcat %s_all_attachment_%s.csv | xsv select pageId,attId,mediaType,webuiLink,fileSize | xsv sort -N -R -s fileSize | xsv table | head -51\n" $ac_SITE_NAME $ac_TS_DATETIME
+  printf "\taccPages csv > %s_all_pages_%s.csv\n" $ac_SITE_NAME $acp_TS_DATETIME
+  printf "\t%s csv -f %s_all_pages_%s.csv > %s_all_attachment_%s.csv\n" $acp_command $ac_SITE_NAME $acp_TS_DATETIME $ac_SITE_NAME $acp_TS_DATETIME
+  printf "\txsv index %s_all_attachment_%s.csv\n" $ac_SITE_NAME $acp_TS_DATETIME
+  printf "\tcat %s_all_attachment_%s.csv | xsv select pageId,attId,mediaType,webuiLink,fileSize | xsv sort -N -R -s fileSize | xsv table | head -51\n" $ac_SITE_NAME $acp_TS_DATETIME
   printf "  o) json: count elements\n"
-  printf "\t%s json | jq -s '[.][] | length'\n" $ac_command
-
+  printf "\t%s json | jq -s '[.][] | length'\n" $acp_command
   ;;
 
 *)
-  $(basename "$0") help
+  $acp_command help
   ;;
 esac  

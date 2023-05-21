@@ -1,5 +1,5 @@
 #!/bin/zsh
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 declare -a available_keywords=("load" "csv" "set" "selected")
 if [[ -z $1 ]]; then; user_keyword="hugo"; else; user_keyword=$1; fi
 if ! is_keyword_valid ${user_keyword} ${available_keywords[@]}; then; exit 0; fi
@@ -12,7 +12,7 @@ case $1 in
     exit
   fi
   ProjectIdOrKey=$2
-  curl -s -X POST --url "${ac_url}project/${ProjectIdOrKey}/avatar2" -u "${ac_user}" -H "${h_xat_nocheck}" -H "${h_ct_png}" --data-binary @${3}
+  curl -s -X POST --url "${acp_URL_JIRA3}project/${ProjectIdOrKey}/avatar2" -u "${acp_AUTH}" -H "${acp_HAT_NOC}" -H "${acp_HCT_PNG}" --data-binary @${3}
   ;;
 
 "csv")
@@ -22,7 +22,7 @@ case $1 in
     exit
   fi
   ProjectIdOrKey=$2
-  http_response=`curl -s -X GET --url "${ac_url}project/${ProjectIdOrKey}/avatars" -u "${ac_user}" -H "${h_a_json}" | jq -r '.custom[] | [.id, .isSelected ] | @csv'`
+  http_response=`curl -s -X GET --url "${acp_URL_JIRA3}project/${ProjectIdOrKey}/avatars" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.custom[] | [.id, .isSelected ] | @csv'`
   echo ${http_response}
   ;; 
 
@@ -34,7 +34,7 @@ if [ -z $2 ] || [ -z $3 ]; then
   fi
   ProjectIdOrKey=$2
   avatarId=$3
-  curl -s -X PUT --url "${ac_url}project/${ProjectIdOrKey}/avatar" -u "${ac_user}" -H "${h_a_json}" -H "${h_ct_json}" --data "$(jq -n --arg avatarId $avatarId '{"id": $avatarId }')"
+  curl -s -X PUT --url "${acp_URL_JIRA3}project/${ProjectIdOrKey}/avatar" -u "${acp_AUTH}" -H "${acp_HA_JSON}" -H "${acp_HCT_JSON}" --data "$(jq -n --arg avatarId $avatarId '{"id": $avatarId }')"
   ;;
 
 "selected")
@@ -43,7 +43,7 @@ if [ -z $2 ] || [ -z $3 ]; then
     exit
   fi
   ProjectIdOrKey=$2
-  http_response=`curl -s --X GET --url "${ac_url}project/$2/avatars" -u "${ac_user}" -H "${h_a_json}" | jq -r '.system + .custom | .[] | select(.isSelected).id'`
+  http_response=`curl -s --X GET --url "${acp_URL_JIRA3}project/$2/avatars" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.system + .custom | .[] | select(.isSelected).id'`
   echo ${http_response}
   ;;
 esac

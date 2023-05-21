@@ -1,30 +1,30 @@
 #!/bin/zsh
 # https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-space/#api-group-space
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 typeset -A commandUsages
-commandUsages+=([count]="Count the number of spaces. Usage:\n$ac_command %s [--status <status>] [--type <type>]\n")
-commandUsages+=([json]="Retrieve data in json format. Usage:\n$ac_command %s [--status <status>] [--type <type>]\n")
-commandUsages+=([csv]="Retrieve data in csv format. Usage:\n$ac_command %s [--status <status>] [--type <type>] [--column <key>0...3]\n\tavailable keys: $(printf "(%s)" ${(kj: | :)acc_SPACE_AVAILABLE_KEYS})\n")
-commandUsages+=([delete]="Delete Space(s). [STDIN spaceKeys]. Usage:\n$ac_command %s -i <spaceKey n> [-v] [-s] -j <async_TaskId n>\n")
+commandUsages+=([count]="Count the number of spaces. Usage:\n$acp_command %s [--status <status>] [--type <type>]\n")
+commandUsages+=([json]="Retrieve data in json format. Usage:\n$acp_command %s [--status <status>] [--type <type>]\n")
+commandUsages+=([csv]="Retrieve data in csv format. Usage:\n$acp_command %s [--status <status>] [--type <type>] [--column <key>0...3]\n\tavailable keys: $(printf "(%s)" ${(kj: | :)acp_SPACE_AVAILABLE_KEYS})\n")
+commandUsages+=([delete]="Delete Space(s). [STDIN spaceKeys]. Usage:\n$acp_command %s -i <spaceKey n> [-v] [-s] -j <async_TaskId n>\n")
 
 function ac_Print_Help() {
-  printf "\nHelp for %s commands:\n\n" $ac_command
+  printf "\nHelp for %s commands:\n\n" $acp_command
   for command commandUsage in ${(kv)commandUsages}; do
     printf "%s - " $command
     printf "${commandUsage}\n" ${command}
   done
   tabs -15
   printf "Options:\n"
-  printf "  --status\t(%s) [default: all].\n" ${(kj: | :)acc_SPACE_STATUS}
-  printf "  --type\t(%s) [default: all].\n" ${(kj: | :)acc_SPACE_TYPE}
+  printf "  --status\t(%s) [default: all].\n" ${(kj: | :)acp_SPACE_STATUS}
+  printf "  --type\t(%s) [default: all].\n" ${(kj: | :)acp_SPACE_TYPE}
   printf "  -v\tshow progress of asynchronous deletion.\n"
   printf "  -s\tsilent mode\n"
-  printf "\n%s usage examples:\n" $ac_command
+  printf "\n%s usage examples:\n" $acp_command
   tabs -5
   printf "  o) select by a name\n"
-  printf "\t%s json | jq 'select(.name==\"name\")'\n" $ac_command
+  printf "\t%s json | jq 'select(.name==\"name\")'\n" $acp_command
   printf "  o) count elements\n"
-  printf "\t%s json | jq -s '[.][] | length'\n" $ac_command
+  printf "\t%s json | jq -s '[.][] | length'\n" $acp_command
   printf "\n"
   tabs -8
 }
@@ -36,12 +36,12 @@ function getPercentageCompleteOfDeletionTask() {
   fi
   typeset -r local_async_task_url="$1"
   typeset -i local_percentageComplete=0
-  local_percentageComplete=`curl -s -X GET --url "https://$(cat $HOME/conf/atlassian_cloud_site_name).atlassian.net/wiki/${async_task_url}" -u "${ac_user}" -H "${h_a_json}" | jq '.percentageComplete'`
+  local_percentageComplete=`curl -s -X GET --url "https://$(cat $HOME/conf/atlassian_cloud_site_name).atlassian.net/wiki/${async_task_url}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq '.percentageComplete'`
   printf "%u" ${local_percentageComplete}
 }
 
 
-typeset -r Logfile_AsyncTasks="${ac_command}_Async_TaskIds.csv"
+typeset -r Logfile_AsyncTasks="${acp_command}_Async_TaskIds.csv"
 typeset -A lookup_Array_Id_Name
 typeset -A option_Array_Id_Name
 
@@ -79,11 +79,11 @@ if [[ ${1:l} == "count" || ${1:l} == "json" || ${1:l} == "csv" ]]; then
     exit
   fi
   # validate options
-  if [ -z ${(k)acc_SPACE_STATUS[${option_status[2]}]} ]; then
+  if [ -z ${(k)acp_SPACE_STATUS[${option_status[2]}]} ]; then
     printf "invalid status\n${commandUsages[${subCommand}]}" ${(k)commandUsages[${subCommand}]}
     exit
   fi
-  if [ -z  ${(k)acc_SPACE_TYPE[${option_type[2]}]} ]; then
+  if [ -z  ${(k)acp_SPACE_TYPE[${option_type[2]}]} ]; then
     printf "invalid type\n${commandUsages[${subCommand}]}" ${(k)commandUsages[${subCommand}]}
     exit
   fi
@@ -92,11 +92,11 @@ if [[ ${1:l} == "count" || ${1:l} == "json" || ${1:l} == "csv" ]]; then
     exit
   fi
   for opt column in $option_column; do
-    if [ -z ${(k)acc_SPACE_AVAILABLE_KEYS[${column}]} ]; then
+    if [ -z ${(k)acp_SPACE_AVAILABLE_KEYS[${column}]} ]; then
       printf "bad column\n${commandUsages[${subCommand}]}" ${(k)commandUsages[${subCommand}]}
       exit
     else
-      option_column_headers+=",${(k)acc_SPACE_AVAILABLE_KEYS[${column}]}"
+      option_column_headers+=",${(k)acp_SPACE_AVAILABLE_KEYS[${column}]}"
     fi
   done
   # Pre-loop statements
@@ -113,43 +113,43 @@ if [[ ${1:l} == "count" || ${1:l} == "json" || ${1:l} == "csv" ]]; then
       ;;
   esac
   # Main loop
-  ac_ACC_LINK="init"
-  ac_ACC_LINK_REL="next"
+  acp_ACC_LINK="init"
+  acp_ACC_LINK_REL="next"
   integer -r ac_LIMIT=${(v)ac_LIM[Max]}
-  while [ ! -z $ac_ACC_LINK ] && [[ $ac_ACC_LINK_REL == "next" ]]; do
-    if [[ $ac_ACC_LINK == "init" ]]; then
-      curl_command="curl -i -s -X GET --url \"${ac_URL_WIKI2}spaces?limit=${ac_LIMIT}${(v)acc_SPACE_STATUS[${option_status[2]}]}${(v)acc_SPACE_TYPE[${option_type[2]}]}\" -u ${ac_AUTH} -H ${acHA_JSON}"
+  while [ ! -z $acp_ACC_LINK ] && [[ $acp_ACC_LINK_REL == "next" ]]; do
+    if [[ $acp_ACC_LINK == "init" ]]; then
+      curl_command="curl -i -s -X GET --url \"${acp_URL_WIKI2}spaces?limit=${ac_LIMIT}${(v)acp_SPACE_STATUS[${option_status[2]}]}${(v)acp_SPACE_TYPE[${option_type[2]}]}\" -u ${acp_AUTH} -H ${acp_HA_JSON}"
       if [ -v flag_verbose ]; then
         echo $curl_command
       fi
-      ac_HTTP_PARSE "`eval ${curl_command}`"
+      acp_HTTP_PARSE "`eval ${curl_command}`"
     else
-      curl_command="curl -i -s -X GET --url \"${ac_URL_SITE}${ac_ACC_LINK}\" -u ${ac_AUTH} -H ${acHA_JSON}"
+      curl_command="curl -i -s -X GET --url \"${acp_URL_SITE}${acp_ACC_LINK}\" -u ${acp_AUTH} -H ${acp_HA_JSON}"
       if [ -v flag_verbose ]; then
         echo $curl_command
       fi
-      ac_HTTP_PARSE "`eval ${curl_command}`"
+      acp_HTTP_PARSE "`eval ${curl_command}`"
     fi
     # Work cursor
     case $subCommand in
     "count")
-      recordCount+=`echo $ac_JSON_STRING | grep "^{" | jq -r '.results | length'`
+      recordCount+=`echo $acp_JSON_STRING | grep "^{" | jq -r '.results | length'`
       ;;
     "json")
-      echo $ac_JSON_STRING | jq '.results[]'
+      echo $acp_JSON_STRING | jq '.results[]'
       ;;
     "csv")
       if [ ${#option_column[@]} -eq 0 ]; then
-        echo $ac_JSON_STRING | jq -r '.results[] | [ .id, .key, .name, .type, .status, .homepageId, .description ] | @csv'
+        echo $acp_JSON_STRING | jq -r '.results[] | [ .id, .key, .name, .type, .status, .homepageId, .description ] | @csv'
       fi
       if [ ${#option_column[@]} -eq 2 ]; then
-        echo $ac_JSON_STRING | jq -r --arg key1 ${option_column[2]} '.results[] | [ .id, .[$key1] ] | @csv'
+        echo $acp_JSON_STRING | jq -r --arg key1 ${option_column[2]} '.results[] | [ .id, .[$key1] ] | @csv'
       fi
       if [ ${#option_column[@]} -eq 4 ]; then
-        echo $ac_JSON_STRING | jq -r --arg key1 ${option_column[2]} --arg key2 ${option_column[4]} '.results[] | [ .id, .[$key1], .[$key2] ] | @csv'
+        echo $acp_JSON_STRING | jq -r --arg key1 ${option_column[2]} --arg key2 ${option_column[4]} '.results[] | [ .id, .[$key1], .[$key2] ] | @csv'
       fi
       if [ ${#option_column[@]} -eq 6 ]; then
-        echo $ac_JSON_STRING | jq -r --arg key1 ${option_column[2]} --arg key2 ${option_column[4]} --arg key3 ${option_column[6]} '.results[] | [ .id, .[$key1], .[$key2], .[$key3] ] | @csv'
+        echo $acp_JSON_STRING | jq -r --arg key1 ${option_column[2]} --arg key2 ${option_column[4]} --arg key3 ${option_column[6]} '.results[] | [ .id, .[$key1], .[$key2], .[$key3] ] | @csv'
       fi
       ;;
     esac
@@ -239,16 +239,16 @@ case ${1:l} in
     integer records_in_Logfile_AsyncTasks=`cat ${Logfile_AsyncTasks} | wc -l`
     vared -p "${records_in_Logfile_AsyncTasks} previously deleted spaces in \"${Logfile_AsyncTasks}\" file. Rotate file, yes? " -c YesNo_Logfile_AsyncTasks
     if [[ ${YesNo_Logfile_AsyncTasks} == [Yy]* ]]; then 
-      mv ${Logfile_AsyncTasks} ${Logfile_AsyncTasks}_${timestampDateOnly}T${timestampTimeOnly}.csv
+      mv ${Logfile_AsyncTasks} ${Logfile_AsyncTasks}_${acp_TS_DATE}T${acp_TS_TIME}.csv
     fi  
   fi
   #
   # main loop
   #
-  typeset -r LogFile="${ac_command}_${subCommand}_log_${timestampDateOnly}T${timestampTimeOnly}.tsv"
+  typeset -r LogFile="${acp_command}_${subCommand}_log_${acp_TS_DATE}T${acp_TS_TIME}.tsv"
   printf "spaceKey,name,result\n" | tee -a ${LogFile}
   for Id Name in ${(kv)option_Array_Id_Name}; do
-    http_response=`curl -i -s -X DELETE --url "${ac_wiki_url}space/${Id}" -u "${ac_user}" -H "${h_a_json}"`
+    http_response=`curl -i -s -X DELETE --url "${acp_URL_WIKI2}space/${Id}" -u "${acp_AUTH}" -H "${acp_HA_JSON}"`
     http_return_code=`echo ${http_response} | grep "^HTTP" | awk '{print $2}'`
     json_response=`echo $http_response | grep "^{"`
     printf "%s,%s," ${Id} ${Name} | tee -a ${LogFile} ${Logfile_AsyncTasks}

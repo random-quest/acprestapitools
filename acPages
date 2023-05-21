@@ -6,29 +6,29 @@ while read -t 1 -u 0 line; do
   ac_STDIN+=($line)
 done
 
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 typeset -A commandUsages
-commandUsages+=([count]="Count the number of pages. Usage:\n$ac_command %s ([--spaceId <spaceId> ...] | [--labelId <labelId> ...])\n")
-commandUsages+=([json]="Retrieve data in json format. Usage:\n$ac_command %s ([--spaceId <spaceId> ...] | [--labelId <labelId> ...])\n")
-commandUsages+=([csv]="Retrieves data in csv format. Usage:\n$ac_command %s ([--spaceId <spaceId> ...] | [--lableId <labelId> ...]) [--column <key>0...3] [--header (true | false)]\n\tavailable keys: $(printf "(%s)" ${(kj: | :)acc_PAGE_AVAILABLE_KEYS})\n")
+commandUsages+=([count]="Count the number of pages. Usage:\n$acp_command %s ([--spaceId <spaceId> ...] | [--labelId <labelId> ...])\n")
+commandUsages+=([json]="Retrieve data in json format. Usage:\n$acp_command %s ([--spaceId <spaceId> ...] | [--labelId <labelId> ...])\n")
+commandUsages+=([csv]="Retrieves data in csv format. Usage:\n$acp_command %s ([--spaceId <spaceId> ...] | [--lableId <labelId> ...]) [--column <key>0...3] [--header (true | false)]\n\tavailable keys: $(printf "(%s)" ${(kj: | :)acp_PAGE_AVAILABLE_KEYS})\n")
 
 function ac_Print_Help() {
-  printf "\nHelp for %s commands:\n\n" $ac_command
+  printf "\nHelp for %s commands:\n\n" $acp_command
   for command commandUsage in ${(kv)commandUsages}; do
     printf "%s - " $command
     printf "${commandUsage}\n" ${command}
   done
   tabs -15
   printf "Valid values:\n"
-  printf "  status\t(%s).\n" ${(kj: | :)acc_PAGE_STATUS}
-  printf "\n%s usage examples:\n" $ac_command
+  printf "  status\t(%s).\n" ${(kj: | :)acp_PAGE_STATUS}
+  printf "\n%s usage examples:\n" $acp_command
   tabs -5
   printf "  o) json: select by a name\n"
-  printf "\t%s json | jq 'select(.name=="name")'\n" $ac_command
+  printf "\t%s json | jq 'select(.name=="name")'\n" $acp_command
   printf "  o) json: count elements\n"
-  printf "\t%s json | jq -s '[.][] | length'\n" $ac_command
+  printf "\t%s json | jq -s '[.][] | length'\n" $acp_command
   printf "  o) csv: sort -R by createdAt\n"
-  printf "\t%s csv --spaceId 123456789 | xsv sort -R -N -s createdAt_UT\n" $ac_command
+  printf "\t%s csv --spaceId 123456789 | xsv sort -R -N -s createdAt_UT\n" $acp_command
   tabs -8
 }
 
@@ -80,16 +80,16 @@ if [[ ${1:l} == "count" || ${1:l} == "json" || ${1:l} == "csv" ]]; then
     exit
   fi
   for opt column in $option_columns; do
-    if [ -z ${(k)acc_PAGE_AVAILABLE_KEYS[${column}]} ]; then
+    if [ -z ${(k)acp_PAGE_AVAILABLE_KEYS[${column}]} ]; then
       printf "unmatched --column\n${commandUsages[${subCommand}]}" ${(k)commandUsages[${subCommand}]}
       exit
     else
-      option_columns_headers+=",${(k)acc_PAGE_AVAILABLE_KEYS[${column}]}"
+      option_columns_headers+=",${(k)acp_PAGE_AVAILABLE_KEYS[${column}]}"
     fi
   done
   if [ -v option_bodyFormat ]; then
-    if [ -z ${(k)acc_PAGE_BODYFORMAT[${option_bodyFormat[2]}]} ]; then
-      printf "unmatched option --bodyFormat\n%s\n" ${(kj: | :)acc_PAGE_BODYFORMAT} 
+    if [ -z ${(k)acp_PAGE_BODYFORMAT[${option_bodyFormat[2]}]} ]; then
+      printf "unmatched option --bodyFormat\n%s\n" ${(kj: | :)acp_PAGE_BODYFORMAT} 
       exit
     else
       param_bodyformat="body-format=${option_bodyFormat[2]}"
@@ -104,17 +104,17 @@ if [[ ${1:l} == "count" || ${1:l} == "json" || ${1:l} == "csv" ]]; then
         ;;
     esac
     for opt value in $option_pageId; do
-      curl_command="curl -i -s -X GET --url \"${ac_URL_WIKI2}pages/${value}?${param_bodyformat}\" -u ${ac_AUTH} -H ${acHA_JSON}" 
+      curl_command="curl -i -s -X GET --url \"${acp_URL_WIKI2}pages/${value}?${param_bodyformat}\" -u ${acp_AUTH} -H ${acp_HA_JSON}" 
       if [ -v flag_verbose ]; then
         echo $curl_command
       fi
-      ac_HTTP_PARSE "`eval ${curl_command}`"
+      acp_HTTP_PARSE "`eval ${curl_command}`"
       case $subCommand in
         "json")
-          echo $ac_JSON_STRING | jq 
+          echo $acp_JSON_STRING | jq 
           ;;
         "csv")
-          echo $ac_JSON_STRING | jq -r '[ .spaceId, .id, .parentId, .status, .version.number, .version.authorId, .version.createdAt, (.version.createdAt[:19]+"Z"|strptime("%Y-%m-%dT%H:%M:%SZ")|mktime), .authorId, .createdAt, (.createdAt[:19]+"Z"|strptime("%Y-%m-%dT%H:%M:%SZ")|mktime), .title ] | @csv'
+          echo $acp_JSON_STRING | jq -r '[ .spaceId, .id, .parentId, .status, .version.number, .version.authorId, .version.createdAt, (.version.createdAt[:19]+"Z"|strptime("%Y-%m-%dT%H:%M:%SZ")|mktime), .authorId, .createdAt, (.createdAt[:19]+"Z"|strptime("%Y-%m-%dT%H:%M:%SZ")|mktime), .title ] | @csv'
           ;;
       esac
     done
@@ -148,42 +148,42 @@ if [[ ${1:l} == "count" || ${1:l} == "json" || ${1:l} == "csv" ]]; then
           rest_endpoint="labels/${value}/pages"
           ;;
       esac
-      ac_ACC_LINK="init"
-      ac_ACC_LINK_REL="next"
-      while [ ! -z $ac_ACC_LINK ] && [[ $ac_ACC_LINK_REL == "next" ]]; do
-        if [[ $ac_ACC_LINK == "init" ]]; then
-          curl_command="curl -i -s -X GET --url \"${ac_URL_WIKI2}${rest_endpoint}?limit=${ac_LIMIT}&${param_bodyformat}\" -u ${ac_AUTH} -H ${acHA_JSON}" 
+      acp_ACC_LINK="init"
+      acp_ACC_LINK_REL="next"
+      while [ ! -z $acp_ACC_LINK ] && [[ $acp_ACC_LINK_REL == "next" ]]; do
+        if [[ $acp_ACC_LINK == "init" ]]; then
+          curl_command="curl -i -s -X GET --url \"${acp_URL_WIKI2}${rest_endpoint}?limit=${ac_LIMIT}&${param_bodyformat}\" -u ${acp_AUTH} -H ${acp_HA_JSON}" 
           if [ -v flag_verbose ]; then
             echo $curl_command
           fi
-          ac_HTTP_PARSE "`eval ${curl_command}`"
+          acp_HTTP_PARSE "`eval ${curl_command}`"
         else
-          curl_command="curl -i -s -X GET --url \"${ac_URL_SITE}${ac_ACC_LINK}\" -u ${ac_AUTH} -H ${acHA_JSON}"
+          curl_command="curl -i -s -X GET --url \"${acp_URL_JIRA3_SITE}${acp_ACC_LINK}\" -u ${acp_AUTH} -H ${acp_HA_JSON}"
           if [ -v flag_verbose ]; then
             echo $curl_command
           fi
-          ac_HTTP_PARSE "`eval ${curl_command}`"
+          acp_HTTP_PARSE "`eval ${curl_command}`"
         fi
         # work cursor
         case $subCommand in
         "count")
-          recordCount+=`echo $ac_JSON_STRING | grep "^{" | jq -r '.results | length'`
+          recordCount+=`echo $acp_JSON_STRING | grep "^{" | jq -r '.results | length'`
           ;;
         "json")
-          echo $ac_JSON_STRING | jq 
+          echo $acp_JSON_STRING | jq 
           ;;
         "csv")
           if [ ${#option_columns[@]} -eq 0 ]; then
-            echo $ac_JSON_STRING | jq -r '.results[] | [ .spaceId, .id, .parentId, .status, .version.number, .version.authorId, .version.createdAt, (.version.createdAt[:19]+"Z"|strptime("%Y-%m-%dT%H:%M:%SZ")|mktime), .authorId, .createdAt, (.createdAt[:19]+"Z"|strptime("%Y-%m-%dT%H:%M:%SZ")|mktime), .title ] | @csv'
+            echo $acp_JSON_STRING | jq -r '.results[] | [ .spaceId, .id, .parentId, .status, .version.number, .version.authorId, .version.createdAt, (.version.createdAt[:19]+"Z"|strptime("%Y-%m-%dT%H:%M:%SZ")|mktime), .authorId, .createdAt, (.createdAt[:19]+"Z"|strptime("%Y-%m-%dT%H:%M:%SZ")|mktime), .title ] | @csv'
           fi
           if [ ${#option_columns[@]} -eq 2 ]; then
-            echo $ac_JSON_STRING | jq -r --arg key1 ${option_columns[2]} '.results[] | [ .spaceId, .id, .parentId, .[$key1] ] | @csv'
+            echo $acp_JSON_STRING | jq -r --arg key1 ${option_columns[2]} '.results[] | [ .spaceId, .id, .parentId, .[$key1] ] | @csv'
           fi
           if [ ${#option_columns[@]} -eq 4 ]; then
-            echo $ac_JSON_STRING | jq -r --arg key1 ${option_columns[2]} --arg key2 ${option_columns[4]} '.results[] | [ .spaceId, .id, .parentId, .[$key1], .[$key2] ] | @csv'
+            echo $acp_JSON_STRING | jq -r --arg key1 ${option_columns[2]} --arg key2 ${option_columns[4]} '.results[] | [ .spaceId, .id, .parentId, .[$key1], .[$key2] ] | @csv'
           fi
           if [ ${#option_columns[@]} -eq 6 ]; then
-            echo $ac_JSON_STRING | jq -r --arg key1 ${option_columns[2]} --arg key2 ${option_columns[4]} --arg key3 ${option_columns[6]} '.results[] | [ .spaceId, .id, .parentId, .[$key1], .[$key2], .[$key3] ] | @csv'
+            echo $acp_JSON_STRING | jq -r --arg key1 ${option_columns[2]} --arg key2 ${option_columns[4]} --arg key3 ${option_columns[6]} '.results[] | [ .spaceId, .id, .parentId, .[$key1], .[$key2], .[$key3] ] | @csv'
           fi
           ;;
         esac

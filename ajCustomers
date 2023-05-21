@@ -1,7 +1,7 @@
 #!/bin/zsh
 # based on https://developer.atlassian.com/cloud/jira/service-desk/rest/api-group-customer/#api-group-customer
 # https://developer.atlassian.com/cloud/jira/service-desk/rest/api-group-servicedesk/#api-rest-servicedeskapi-servicedesk-servicedeskid-customer-get
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 declare -a available_keywords=("count" "json" "csv")
 if [[ -z $1 ]]; then; user_keyword="hugo"; else; user_keyword=$1; fi
 if ! is_keyword_valid ${user_keyword} ${available_keywords[@]}; then; exit 0; fi
@@ -27,7 +27,7 @@ case $1 in
   typeset -i pagination_index
   pagination_index=0
   while ! $(${isLastPage}); do
-    http_response=`curl -s -X GET --url "${ac_sd_url}servicedesk/${servicedesk}/customer?start=${pagination_index}&limit=${max_results}" -u "${ac_user}" -H "${h_a_json}" -H "${h_x_experimental}"`
+    http_response=`curl -s -X GET --url "${acp_URL_SD}servicedesk/${servicedesk}/customer?start=${pagination_index}&limit=${max_results}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" -H "${acp_HEX_OPT}"`
     isLastPage=`echo ${http_response} | jq '.isLastPage'`
     echo ${http_response} | jq '.values[]'
     pagination_index=${pagination_index}+${max_results}
@@ -45,7 +45,7 @@ case $1 in
   pagination_index=0
   printf "accountId,emailAddress,displayName,active\n"
   while ! $(${isLastPage}); do
-    http_response=`curl -s -X GET --url "${ac_sd_url}servicedesk/${servicedesk}/customer?start=${pagination_index}&limit=${max_results}" -u "${ac_user}" -H "${h_a_json}" -H "${h_x_experimental}"`
+    http_response=`curl -s -X GET --url "${acp_URL_SD}servicedesk/${servicedesk}/customer?start=${pagination_index}&limit=${max_results}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" -H "${acp_HEX_OPT}"`
     isLastPage=`echo ${http_response} | jq '.isLastPage'`
     echo ${http_response} | jq -r '.values[] | [ .accountId, .emailAddress, .displayName, .active ] | @csv'
     pagination_index=${pagination_index}+${max_results}

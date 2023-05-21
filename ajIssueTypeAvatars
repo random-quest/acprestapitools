@@ -1,12 +1,12 @@
 #!/bin/zsh
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 declare -a available_keywords=("count" "getids" "json" "csv")
 if [[ -z $1 ]]; then; user_keyword="hugo"; else; user_keyword=$1; fi
 if ! is_keyword_valid ${user_keyword} ${available_keywords[@]}; then; exit 0; fi
 
 getids()
 {
-curl -s -X GET --url "${ac_url}avatar/issuetype/system" -u "${ac_user}" -H "${h_a_json}" | jq -r '.system[].id'
+curl -s -X GET --url "${acp_URL_JIRA3}avatar/issuetype/system" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.system[].id'
 }
 
 case $1 in
@@ -17,18 +17,18 @@ case $1 in
   getids
   ;;
 "json")
-  curl -s -X GET --url "${ac_url}avatar/issuetype/system" -u "${ac_user}" -H "${h_a_json}" | jq
+  curl -s -X GET --url "${acp_URL_JIRA3}avatar/issuetype/system" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq
   ;;
 "csv")
   typeset -a avatarIds
   printf "avatarId,avatarTitle,url\n"
   avatarIds=(`getids`)
   for avatarId in ${avatarIds}; do
-    avatarTitle=`curl -s -X GET --url "${ac_url}universal_avatar/view/type/issuetype/avatar/${avatarId}" -u "${ac_user}" | htmlq -t 'title'`
+    avatarTitle=`curl -s -X GET --url "${acp_URL_JIRA3}universal_avatar/view/type/issuetype/avatar/${avatarId}" -u "${acp_AUTH}" | htmlq -t 'title'`
     if [ -z ${avatarTitle} ]; then
       avatarTitle="NoName"
     fi
-    printf "%s,%s,%s\n" ${avatarId} ${avatarTitle} "${ac_url}universal_avatar/view/type/issuetype/avatar/${avatarId}"
+    printf "%s,%s,%s\n" ${avatarId} ${avatarTitle} "${acp_URL_JIRA3}universal_avatar/view/type/issuetype/avatar/${avatarId}"
   done
   ;;
 esac

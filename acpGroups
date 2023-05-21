@@ -1,5 +1,5 @@
 #!/bin/zsh
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 # FIXME can we do this use case?
 # Group usage - List of project permission per group
 # An alternative way is to leverage Jira cloud REST Api to get the details to check if a group is being used in a permission scheme. See below for sample script.
@@ -13,7 +13,7 @@ max_results=50
 
 countgroups()
 {
-curl -s -X GET --url "${ac_url}group/bulk" --user "${ac_user}" --header "${h_a_json}" | jq '.total'
+curl -s -X GET --url "${acp_URL_JIRA3}group/bulk" --user "${acp_AUTH}" --header "${acp_HA_JSON}" | jq '.total'
 }
 getids()
 {
@@ -21,7 +21,7 @@ num_groups=$(countgroups)
 num_pages=$((${num_groups}/${max_results}))
 for i in `seq 0 ${num_pages}`
 do
-  curl -s -X GET --url "${ac_url}group/bulk?startAt=$(($i*${max_results}))&maxResults=${max_results}" -u "${ac_user}" -H "${h_a_json}" | jq '.values[].groupId'
+  curl -s -X GET --url "${acp_URL_JIRA3}group/bulk?startAt=$(($i*${max_results}))&maxResults=${max_results}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq '.values[].groupId'
 done
 }
 
@@ -40,7 +40,7 @@ case $1 in
   printf "groupId,groupName\n"
   for i in `seq 0 ${num_pages}`
   do
-    curl -s -X GET --url "${ac_url}group/bulk?startAt=$(($i*${max_results}))&maxResults=${max_results}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[] | [ .groupId, .name ] | @csv'
+    curl -s -X GET --url "${acp_URL_JIRA3}group/bulk?startAt=$(($i*${max_results}))&maxResults=${max_results}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.values[] | [ .groupId, .name ] | @csv'
   done
   ;; 
 
@@ -49,7 +49,7 @@ case $1 in
     print_command_usage $1 "groupName"
     exit
   fi
-  curl -s -X GET --url "${ac_url}group/bulk?groupName=${2}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[].groupId'
+  curl -s -X GET --url "${acp_URL_JIRA3}group/bulk?groupName=${2}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.values[].groupId'
   ;;
 
 "groupNameById")
@@ -57,5 +57,5 @@ case $1 in
     print_command_usage $1 "groupId"
     exit
   fi
-  curl -s -X GET --url "${ac_url}group/bulk?groupId=${2}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[].name'
+  curl -s -X GET --url "${acp_URL_JIRA3}group/bulk?groupId=${2}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.values[].name'
 esac

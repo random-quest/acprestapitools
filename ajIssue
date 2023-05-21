@@ -1,5 +1,5 @@
 #!/bin/zsh
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 
 typeset -A commandUsages
 commandUsages=([expandnames]="%s:\tjson output with expanded names for an issueIdOrKey.\n\t\tArguments: <issueIdOrKey>\n")
@@ -13,7 +13,7 @@ case ${1:l} in
 # https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issues/#api-rest-api-3-issue-issueidorkey-get
   if [ ! -z $2 ]; then
     issueIdOrKey=$2
-    curl -s -X GET --url "${ac_url}issue/${issueIdOrKey}?expand=names" -u "${ac_user}" -H "${h_a_json}" | jq  
+    curl -s -X GET --url "${acp_URL_JIRA3}issue/${issueIdOrKey}?expand=names" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq  
   else
     printf ${commandUsages[${1:l}]} ${(k)commandUsages[${1:l}]}
   fi

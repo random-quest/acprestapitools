@@ -1,11 +1,11 @@
 #!/bin/zsh
 # based on https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-projects/#api-group-projects
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 integer -r maxResults=50
 integer recordCount
 integer numPages
 function getAvailableKeys() {
-  typeset local_availableKeysArray=(`curl -s -X GET --url "${ac_url}project/search?status=active&expand=${expandParam}" -u "${ac_user}" -H  "${h_a_json}" | jq -r '.values[0] | keys_unsorted | .[]'`)
+  typeset local_availableKeysArray=(`curl -s -X GET --url "${acp_URL_JIRA3}project/search?status=active&expand=${expandParam}" -u "${acp_AUTH}" -H  "${acp_HA_JSON}" | jq -r '.values[0] | keys_unsorted | .[]'`)
   stringOfAvailableKeys=$(printf "(%s)" ${(j: | :)local_availableKeysArray})
 }
 getAvailableKeys
@@ -52,7 +52,7 @@ function getValuesByKey() {
     integer local_pageCounter
     for local_pageCounter in {0..$numPages}; do
       local_startIndex=${local_pageCounter}*${maxResults}
-      curl -s -X GET --url "${ac_url}project/search?startAt=${local_startIndex}&maxResults=${maxResults}&${local_queryParameterStatus}" -u "${ac_user}" -H "${h_a_json}" | jq -r --arg key $1 '.values[][$key]' | sort
+      curl -s -X GET --url "${acp_URL_JIRA3}project/search?startAt=${local_startIndex}&maxResults=${maxResults}&${local_queryParameterStatus}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r --arg key $1 '.values[][$key]' | sort
     done
   else
     if [ -z $1 ]; then
@@ -67,7 +67,7 @@ function getValuesByKey() {
 function getKeyByProjectKeyOrId() {
   # https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-projects/#api-rest-api-3-project-projectidorkey-get
   if [ ! -z $1 ] && [ ! -z $2 ]; then
-    result_getKeyByProjectKeyOrId=`curl -s -X GET --url "${ac_url}project/${1:u}" -u "${ac_user}" -H "${h_a_json}" | jq -r --arg key $2 '.[$key]'`
+    result_getKeyByProjectKeyOrId=`curl -s -X GET --url "${acp_URL_JIRA3}project/${1:u}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r --arg key $2 '.[$key]'`
   else
     prinf "getKeyByKeyOrId() needs the two parameters: $1 projectKeyOrId $2 JSON-Key\n"
   fi
@@ -90,7 +90,7 @@ function count() {
       local_queryParameterStatus="status=live&status=archived&status=deleted"
       ;;
     esac
-    recordCount=`curl -s -X GET --url "${ac_url}project/search?${local_queryParameterStatus}" -u "${ac_user}" -H "${h_a_json}" | jq '.total'`
+    recordCount=`curl -s -X GET --url "${acp_URL_JIRA3}project/search?${local_queryParameterStatus}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq '.total'`
     numPages=${recordCount}/${maxResults}
   else
     prinf "count() needs the \"status\" parameter\n"
@@ -98,7 +98,7 @@ function count() {
 }
 
 function isJSWProject() {
-  local_projectTypeKey=`curl -s -X GET --url "${ac_url}project/${1:u}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.projectTypeKey'`
+  local_projectTypeKey=`curl -s -X GET --url "${acp_URL_JIRA3}project/${1:u}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.projectTypeKey'`
   if [[ ${local_projectTypeKey} == "software" ]]; then
     return 0
   else
@@ -112,14 +112,14 @@ function isExistsProjectIdOrKey() {
     # empty argument returns "not found"
     return 1
   fi
-  integer local_http_return_code=`curl -i -s -X GET --url "${ac_url}project/${1:u}" -u "${ac_user}" -H "${h_a_json}" | grep "^HTTP" | awk '{print $2}'`
+  integer local_http_return_code=`curl -i -s -X GET --url "${acp_URL_JIRA3}project/${1:u}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | grep "^HTTP" | awk '{print $2}'`
   if [ ${local_http_return_code} -eq 200 ]; then
-    typeset local_isArchived=`curl -s -X GET --url "${ac_url}project/${1:u}" -u "${ac_user}" -H "${h_a_json}" | jq '.archived'`
+    typeset local_isArchived=`curl -s -X GET --url "${acp_URL_JIRA3}project/${1:u}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq '.archived'`
     if [[ ${local_isArchived} == "true" ]]; then
       # project is archived
       return 2
     else
-      typeset local_isDeleted=`curl -s -X GET --url "${ac_url}project/${1:u}" -u "${ac_user}" -H "${h_a_json}" | jq '.deleted'`
+      typeset local_isDeleted=`curl -s -X GET --url "${acp_URL_JIRA3}project/${1:u}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq '.deleted'`
       if [[ ${local_isDeleted} == "true" ]]; then
         # project is deleted
         return 3
@@ -206,7 +206,7 @@ case ${1:l} in
       printf "%s," ${projectKey}
     fi
     # https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-search/#api-rest-api-3-search-get
-    projectIssuesCount=`curl -s -X GET --url "${ac_url}search?jql=project=${projectKey}&fields=summary" -u "${ac_user}" -H "${h_a_json}" | jq '.total'`
+    projectIssuesCount=`curl -s -X GET --url "${acp_URL_JIRA3}search?jql=project=${projectKey}&fields=summary" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq '.total'`
     if ! ${optionGrantTotal}; then
       printf "%u\n" ${projectIssuesCount}
     fi
@@ -226,7 +226,7 @@ case ${1:l} in
   ;;
 
 "listkeys")
-  curl -s -X GET --url "${ac_url}project/search?expand=description,projectKeys,lead,issueTypes,url,insight" -u "${ac_user}" -H  "${h_a_json}" | jq -r '.values[0] | keys_unsorted | .[]'
+  curl -s -X GET --url "${acp_URL_JIRA3}project/search?expand=description,projectKeys,lead,issueTypes,url,insight" -u "${acp_AUTH}" -H  "${acp_HA_JSON}" | jq -r '.values[0] | keys_unsorted | .[]'
   ;;
 
 
@@ -236,7 +236,7 @@ case ${1:l} in
   integer pageCounter
   for pageCounter in {0..$numPages}; do
     startIndex=${pageCounter}*${maxResults}
-    curl -s -X GET --url "${ac_url}project/search?expand=projectKeys,permissions&startAt=${startIndex}&maxResults=${maxResults}&status=live&status=archived&status=deleted" -u "${ac_user}" -H "${h_a_json}" | jq '.values[]'
+    curl -s -X GET --url "${acp_URL_JIRA3}project/search?expand=projectKeys,permissions&startAt=${startIndex}&maxResults=${maxResults}&status=live&status=archived&status=deleted" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq '.values[]'
   done
   ;;
 
@@ -247,8 +247,8 @@ case ${1:l} in
   printf "projectId,projectKey,projectKeys,projectName,projectCategory,projectType,isArchived,isDeleted,canEdit\n"
   for pageCounter in {0..$numPages}; do
     startIndex=${pageCounter}*${maxResults}
-    curl -s -X GET --url "${ac_url}project/search?expand=projectKeys,permissions&startAt=${startIndex}&maxResults=${maxResults}&status=live&status=archived" \
-      -u "${ac_user}" -H "${h_a_json}" | \
+    curl -s -X GET --url "${acp_URL_JIRA3}project/search?expand=projectKeys,permissions&startAt=${startIndex}&maxResults=${maxResults}&status=live&status=archived" \
+      -u "${acp_AUTH}" -H "${acp_HA_JSON}" | \
       jq -r '[.values[]] | sort_by(.key) | .[] | [ (.id|tonumber), .key, (.projectKeys|join("|")), .name, .projectCategory.name, .projectTypeKey, (if .archivedDate == null then "NA" else (.archivedDate[0:10]) end), (if .deletedDate == null then "NA" else (.deletedDate[0:10]) end), .permissions.canEdit ] | @csv'
   done
   ;;
@@ -268,7 +268,7 @@ case ${1:l} in
     done
     shift $((OPTIND-1))
     if ${optionListKeys}; then
-      curl -s -X GET --url "${ac_url}project/${1:u}" -u "${ac_user}" -H "${h_a_json}" | jq -r 'keys_unsorted | .[]'
+      curl -s -X GET --url "${acp_URL_JIRA3}project/${1:u}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r 'keys_unsorted | .[]'
     else
       getKeyByProjectKeyOrId $1 $2
       if [[ ${result_getKeyByProjectKeyOrId} != "null" ]]; then
@@ -330,7 +330,7 @@ case ${1:l} in
     done
   fi
   if ! ${optionJSON} && [ ! -z ${projectIdOrKeys[@]:0:1} ]; then
-    featureColumnHeader=`curl -s -X GET --url "${ac_url}project/${projectIdOrKeys[@]:0:1}/features" -u "${ac_user}" -H "${h_a_json}" | \
+    featureColumnHeader=`curl -s -X GET --url "${acp_URL_JIRA3}project/${projectIdOrKeys[@]:0:1}/features" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | \
       jq -r '[.features[]] | sort_by(.localisedName) | [( [ [.[].localisedName] ] | transpose | .[] | join(":") )] | join(",")'`
     printf "projectKey,%s\n" ${featureColumnHeader}
   fi
@@ -342,11 +342,11 @@ case ${1:l} in
       continue
     fi
     if ${optionJSON}; then
-      curl -s -X GET --url "${ac_url}project/${projectIdOrKey}/features" -u "${ac_user}" -H "${h_a_json}" | jq '.features[]'
+      curl -s -X GET --url "${acp_URL_JIRA3}project/${projectIdOrKey}/features" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq '.features[]'
     else
       getKeyByProjectKeyOrId ${projectIdOrKey} key
       projectKey=${result_getKeyByProjectKeyOrId}
-      curl -s -X GET --url "${ac_url}project/${projectIdOrKey}/features" -u "${ac_user}" -H "${h_a_json}" | \
+      curl -s -X GET --url "${acp_URL_JIRA3}project/${projectIdOrKey}/features" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | \
         jq -r --arg projectKey $projectKey '[.features[]] | sort_by(.localisedName) | [( [ [.[].state] ] | transpose | .[] | join(":") )] | join(",") | "\"" + $projectKey + "\"," + .' | sed "s/ENABLED/Y/g" | sed "s/DISABLED/N/g"
     fi
   done
@@ -380,7 +380,7 @@ case ${1:l} in
   done
 
   for projectIdOrKey in ${projectsArray}; do
-    http_response=`curl -i -s -X POST --url "${ac_url}project/${projectIdOrKey}/archive" -u "${ac_user}" -H "${h_a_json}"`
+    http_response=`curl -i -s -X POST --url "${acp_URL_JIRA3}project/${projectIdOrKey}/archive" -u "${acp_AUTH}" -H "${acp_HA_JSON}"`
     http_return_code=`echo $http_response | grep "^HTTP" | awk '{print $2}'`
     if [ $http_return_code -eq 203 ]; then
       printf "%s,archived\n" ${projectIdOrKey}
@@ -420,7 +420,7 @@ case ${1:l} in
   done
 
   for projectIdOrKey in ${projectsArray}; do
-    http_response=`curl -i -s -X POST --url "${ac_url}project/${projectIdOrKey}/restore" -u "${ac_user}" -H "${h_a_json}"`
+    http_response=`curl -i -s -X POST --url "${acp_URL_JIRA3}project/${projectIdOrKey}/restore" -u "${acp_AUTH}" -H "${acp_HA_JSON}"`
     http_return_code=`echo $http_response | grep "^HTTP" | awk '{print $2}'`
     if [ $http_return_code -eq 200   ]; then
       printf "%s,restored\n" ${projectIdOrKey}
@@ -458,7 +458,7 @@ case ${1:l} in
         printf "%s," `echo ${line} | awk  -F ',' '{print $1}'`
         printf "%s," `echo ${line} | awk  -F ',' '{print $2}'`
         taskUrl=`echo ${line} | awk  -F ',' '{print $3}'`
-        curl -s ${taskUrl} -u "${ac_user}" | jq -r '.progress'
+        curl -s ${taskUrl} -u "${acp_AUTH}" | jq -r '.progress'
       done
       exit
     fi
@@ -503,23 +503,23 @@ case ${1:l} in
       printf "\"%s\" contains %u entries. " ${logfileForTasks} `cat ${logfileForTasks} | wc -l`
       vared -p "Rotate file, yes? " -c YesNoReset_logfileForTasks
       if [[ ${YesNoReset_logfileForTasks} == [Yy]* ]]; then 
-        mv ${logfileForTasks} ${logfileForTasks}_${timestampDateOnly}T${timestampTimeOnly}.csv
+        mv ${logfileForTasks} ${logfileForTasks}_${acp_TS_DATE}T${acp_TS_TIME}.csv
       fi
     fi  
 
-    typeset -r deleteLogFile="ajcProjects_DeleteLog_${timestampDateOnly}T${timestampTimeOnly}.csv"
+    typeset -r deleteLogFile="ajcProjects_DeleteLog_${acp_TS_DATE}T${acp_TS_TIME}.csv"
 
     for projectId in ${projectIds}; do
       getKeyByProjectKeyOrId ${projectId} "key"
       projectKey=${result_getKeyByProjectKeyOrId}
-      http_response=`curl -i -s -X POST --url "${ac_url}project/${projectId}/delete" -u "${ac_user}"`
+      http_response=`curl -i -s -X POST --url "${acp_URL_JIRA3}project/${projectId}/delete" -u "${acp_AUTH}"`
       async_task_url=$(echo $http_response | grep "^location" | awk '{print $2}' | sed "s/\r//")
       http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
       json_error_response=`echo $http_response | grep "^{" | jq -r '.errorMessages[]'`
       printf "%s,%s," ${projectId} ${projectKey} | tee -a ${deleteLogFile}
       if [ $http_return_code -eq 303 ]; then
         sleep 2
-        async_task_progress=`curl -s ${async_task_url} -u "${ac_user}" | jq -r '.progress'  | tee -a ${deleteLogFile}`
+        async_task_progress=`curl -s ${async_task_url} -u "${acp_AUTH}" | jq -r '.progress'  | tee -a ${deleteLogFile}`
         printf "%s\n" ${async_task_progress}
         if [[ ${async_task_progress} != "100" ]]; then
           printf "%s,%s,%s\n" ${projectId} ${projectKey} ${async_task_url} >> ${logfileForTasks}
@@ -541,13 +541,13 @@ case ${1:l} in
     printf ${commandUsage} ${command}
     printf "\n"
   done
-  printf "%s - usage examples:\n" $ac_command
+  printf "%s - usage examples:\n" $acp_command
   printf "  o) list deleted projects in JSON format\n"
-  printf "\t%s json | jq 'select(.deleted)'\n" $ac_command
+  printf "\t%s json | jq 'select(.deleted)'\n" $acp_command
   printf "  o) list archived projects in a table\n"
-  printf "\t%s csv | xsv search -s isArchived \"^[0-9]\" | xsv table\n" $ac_command
+  printf "\t%s csv | xsv search -s isArchived \"^[0-9]\" | xsv table\n" $acp_command
   printf "  o) list features of all \"software\" projects in a table\n"
-  printf "\t%s features -a | xsv table\n" $ac_command
+  printf "\t%s features -a | xsv table\n" $acp_command
   ;;
 
 *)

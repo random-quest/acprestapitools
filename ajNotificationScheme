@@ -1,6 +1,6 @@
 #!/bin/zsh
 # https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-notification-schemes/#api-group-issue-notification-schemes
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 declare -a available_keywords=("count" "get" "csv" "json" "delete")
 if [[ -z $1 ]]; then; user_keyword="hugo"; else; user_keyword=$1; fi
 if ! is_keyword_valid ${user_keyword} ${available_keywords[@]}; then; exit 0; fi
@@ -9,7 +9,7 @@ integer G_count
 integer G_numPages
 
 function count() {
-  typeset -r json_response=`curl -s -X GET --url "${ac_url}notificationscheme" -u "${ac_user}" -H "${h_a_json}" | jq`
+  typeset -r json_response=`curl -s -X GET --url "${acp_URL_JIRA3}notificationscheme" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq`
   G_count=`echo ${json_response} | jq '.total'`
   G_numPages=${G_count}/${G_maxResults}
 }
@@ -19,7 +19,7 @@ function getElement() {
   typeset -r jsonElement=$1
   for page in `seq 0 ${G_numPages}`; do
     integer startIndex=${page}*${G_maxResults}
-    curl -s -X GET --url "${ac_url}notificationscheme?startAt=${startIndex}&maxResults=${G_maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r --arg e $jsonElement '.values[][$e]' | sort
+    curl -s -X GET --url "${acp_URL_JIRA3}notificationscheme?startAt=${startIndex}&maxResults=${G_maxResults}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r --arg e $jsonElement '.values[][$e]' | sort
   done
 }
 
@@ -41,7 +41,7 @@ case $1 in
   count
   for page in `seq 0 ${G_numPages}`; do
     integer startIndex=${page}*${G_maxResults}
-    curl -s -X GET --url "${ac_url}notificationscheme?startAt=${startIndex}&maxResults=${G_maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq '.values[]'
+    curl -s -X GET --url "${acp_URL_JIRA3}notificationscheme?startAt=${startIndex}&maxResults=${G_maxResults}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq '.values[]'
   done
   ;;
 
@@ -49,13 +49,13 @@ case $1 in
   count
   for page in `seq 0 ${G_numPages}`; do
     integer startIndex=${page}*${G_maxResults}
-    curl -s -X GET --url "${ac_url}notificationscheme?startAt=${startIndex}&maxResults=${G_maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[] | [ .id, .name, .description ] | @csv'
+    curl -s -X GET --url "${acp_URL_JIRA3}notificationscheme?startAt=${startIndex}&maxResults=${G_maxResults}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.values[] | [ .id, .name, .description ] | @csv'
   done
   ;;
 
 "delete")
 # https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-notification-schemes/#api-rest-api-3-notificationscheme-notificationschemeid-delete
-  typeset -r deleteLogFile="ajcNS_DeleteLog_${timestampDateOnly}T${timestampTimeOnly}.csv"
+  typeset -r deleteLogFile="ajcNS_DeleteLog_${acp_TS_DATE}T${acp_TS_TIME}.csv"
   if [ -z $2 ]; then
     print_command_usage $1 "(notificationSchemeId | X)"
     exit
@@ -68,7 +68,7 @@ case $1 in
   fi
   for notificationSchemeId in ${notificationSchemeIds}; do
     printf "%u," ${notificationSchemeId} | tee -a ${deleteLogFile}
-    http_response=`curl -i -s -X DELETE --url "${ac_url}notificationscheme/${notificationSchemeId}" -u "${ac_user}"`
+    http_response=`curl -i -s -X DELETE --url "${acp_URL_JIRA3}notificationscheme/${notificationSchemeId}" -u "${acp_AUTH}"`
     http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
     if [ $http_return_code -eq 204 ]; then
       printf "deleted\n" | tee -a ${deleteLogFile}

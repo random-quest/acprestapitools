@@ -1,6 +1,6 @@
 #!/bin/zsh
 # 
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 declare -a available_keywords=("count" "jsonObjectKeys" "csv" "json" "projectUsages" "delete" "help")
 if [[ -z $1 ]]; then; user_keyword="hugo"; else; user_keyword=$1; fi
 if ! is_keyword_valid ${user_keyword} ${available_keywords[@]}; then; exit 0; fi
@@ -9,7 +9,7 @@ integer G_count
 integer G_numPages
 
 function count() {
-  typeset -r json_response=`curl -s -X GET --url "${ac_url}statuses/search" -u "${ac_user}" -H "${h_a_json}" | jq`
+  typeset -r json_response=`curl -s -X GET --url "${acp_URL_JIRA3}statuses/search" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq`
   G_count=`echo ${json_response} | jq '.total'`
   G_numPages=${G_count}/${G_maxResults}
 }
@@ -21,7 +21,7 @@ case $1 in
   ;;
 
 "jsonObjectKeys")
-  curl -s -X GET --url "${ac_url}statuses/search" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[0] | keys_unsorted | .[]' | awk 'BEGIN {print "Root keys:"}; {print "  " $1}'
+  curl -s -X GET --url "${acp_URL_JIRA3}statuses/search" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.values[0] | keys_unsorted | .[]' | awk 'BEGIN {print "Root keys:"}; {print "  " $1}'
   ;;
 
 "csv")
@@ -29,7 +29,7 @@ case $1 in
   printf "id,name,statusCategory,scopeType,description\n"
   for page in `seq 0 ${G_numPages}`; do
     integer startIndex=${page}*${G_maxResults}
-    curl -s -X GET --url "${ac_url}statuses/search?startAt=${startIndex}&maxResults=${G_maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[] | [ (.id|tonumber), .name, .statusCategory, .scope.type, .description[0:80] ] | @csv'
+    curl -s -X GET --url "${acp_URL_JIRA3}statuses/search?startAt=${startIndex}&maxResults=${G_maxResults}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.values[] | [ (.id|tonumber), .name, .statusCategory, .scope.type, .description[0:80] ] | @csv'
   done  
   ;;
 
@@ -37,9 +37,9 @@ case $1 in
   count
   for page in `seq 0 ${G_numPages}`; do
     integer startIndex=${page}*${G_maxResults}
-    curl -s -X GET --url "${ac_url}statuses/search?expand=usages&startAt=${startIndex}&maxResults=${G_maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq '.values[]'
-    #curl -s -X GET --url "${ac_url}statuses/search?expand=usages&startAt=${startIndex}&maxResults=${G_maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[6] | ([.usages[].project.id]|join(","))'
-    #curl -s -X GET --url "${ac_url}statuses/search?expand=usages&startAt=${startIndex}&maxResults=${G_maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[6]
+    curl -s -X GET --url "${acp_URL_JIRA3}statuses/search?expand=usages&startAt=${startIndex}&maxResults=${G_maxResults}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq '.values[]'
+    #curl -s -X GET --url "${acp_URL_JIRA3}statuses/search?expand=usages&startAt=${startIndex}&maxResults=${G_maxResults}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.values[6] | ([.usages[].project.id]|join(","))'
+    #curl -s -X GET --url "${acp_URL_JIRA3}statuses/search?expand=usages&startAt=${startIndex}&maxResults=${G_maxResults}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.values[6]
   done
   ;;
 
@@ -66,10 +66,10 @@ case $1 in
     integer startIndex=${page}*${G_maxResults}
     case ${reportMode} in
     "items")
-      curl -s -X GET --url "${ac_url}statuses/search?expand=usages&startAt=${startIndex}&maxResults=${G_maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[] | [  (.id|tonumber), .name, ( [.usages[].project.id] | join(",") )  ] | @tsv'
+      curl -s -X GET --url "${acp_URL_JIRA3}statuses/search?expand=usages&startAt=${startIndex}&maxResults=${G_maxResults}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.values[] | [  (.id|tonumber), .name, ( [.usages[].project.id] | join(",") )  ] | @tsv'
       ;;
     "sum")
-      curl -s -X GET --url "${ac_url}statuses/search?expand=usages&startAt=${startIndex}&maxResults=${G_maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[] | [  (.id|tonumber), .name, ( [.usages[].project.id] | length ) ] | @csv'
+      curl -s -X GET --url "${acp_URL_JIRA3}statuses/search?expand=usages&startAt=${startIndex}&maxResults=${G_maxResults}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.values[] | [  (.id|tonumber), .name, ( [.usages[].project.id] | length ) ] | @csv'
       ;;
     esac
   done  
@@ -78,7 +78,7 @@ case $1 in
 
 "delete")
 # https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-status/#api-rest-api-3-statuses-delete
- typeset -r deleteLogFile="ajcStatuses_DeleteLog_${timestampDateOnly}T${timestampTimeOnly}.csv"
+ typeset -r deleteLogFile="ajcStatuses_DeleteLog_${acp_TS_DATE}T${acp_TS_TIME}.csv"
   if [ -z $2 ]; then
     print_command_usage $1 "statusId"
     exit
@@ -90,7 +90,7 @@ case $1 in
     exit
   fi
   printf "%u," ${statusId} | tee -a ${deleteLogFile}
-  http_response=`curl -i -s -X DELETE --url "${ac_url}statuses?id=${statusId}" --user "${ac_user}"`
+  http_response=`curl -i -s -X DELETE --url "${acp_URL_JIRA3}statuses?id=${statusId}" --user "${acp_AUTH}"`
   http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
   if [ $http_return_code -eq 204 ]; then
     printf "deleted\n" | tee -a ${deleteLogFile}

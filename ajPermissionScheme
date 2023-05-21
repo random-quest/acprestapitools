@@ -2,7 +2,7 @@
 # find PS where holder is a group
 # ajcPS json | jq -r '.permissionSchemes[] | select(.permissions[].holder.type == "group") | "\(.id),\(.name)"' | sort
 # ajcPS json 10041 | jq '.permissions[] | select(.holder.type == "group")'
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 declare -a available_keywords=("count" "get" "json" "csv" "getPermissionGrants" "createPermissionGrantForAccountId" "deletePermissionGrantForAccountId" "delete")
 if [[ -z $1 ]]; then; user_keyword="hugo"; else; user_keyword=$1; fi
 if ! is_keyword_valid ${user_keyword} ${available_keywords[@]}; then; exit 0; fi
@@ -17,16 +17,16 @@ getElement()
     jsonElement=$2
   fi
   if [[ $1 == "X" ]]; then
-    curl -s -X GET --url "${ac_url}permissionscheme" --user "${ac_user}" -H "${h_a_json}" | jq -r --arg e $jsonElement '.permissionSchemes[][$e]' | sort
+    curl -s -X GET --url "${acp_URL_JIRA3}permissionscheme" --user "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r --arg e $jsonElement '.permissionSchemes[][$e]' | sort
   else
-    curl -s -X GET --url "${ac_url}permissionscheme/$1" -u "${ac_user}" -H "${h_a_json}" | jq -r --arg e $jsonElement '.[$e]'
+    curl -s -X GET --url "${acp_URL_JIRA3}permissionscheme/$1" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r --arg e $jsonElement '.[$e]'
   fi
 }
 
 getPermissionGrants()
 {
   integer -r permissionSchemeId=$1
-  getPermissionGrants_JSON=`curl -s -X GET --url "${ac_url}permissionscheme/${permissionSchemeId}/permission" -u "${ac_user}" -H "${h_a_json}"`
+  getPermissionGrants_JSON=`curl -s -X GET --url "${acp_URL_JIRA3}permissionscheme/${permissionSchemeId}/permission" -u "${acp_AUTH}" -H "${acp_HA_JSON}"`
   if [ ! -z $2 ]; then
     jsonElement=$2
     echo ${getPermissionGrants_JSON} | jq -r --arg e $jsonElement '.permissions[] | select (.holder.type != "applicationRole")[$e]'
@@ -37,7 +37,7 @@ getPermissionGrants()
 
 case $1 in
 "count")
-  curl -s -X GET --url "${ac_url}permissionscheme" --user "${ac_user}" -H "${h_a_json}" | jq -r '.permissionSchemes | length' 
+  curl -s -X GET --url "${acp_URL_JIRA3}permissionscheme" --user "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.permissionSchemes | length' 
   ;;
 
 "get")
@@ -54,16 +54,16 @@ case $1 in
     exit
   fi
   if [[ ${2:u} == "X" ]]; then
-    curl -s -X GET --url "${ac_url}permissionscheme" -u "${ac_user}" -H "${h_a_json}" | jq
+    curl -s -X GET --url "${acp_URL_JIRA3}permissionscheme" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq
   else
     integer permissionSchemeId=$2
-    curl -s -X GET --url "${ac_url}permissionscheme/${permissionSchemeId}" -u "${ac_user}" -H "${h_a_json}" | jq  
+    curl -s -X GET --url "${acp_URL_JIRA3}permissionscheme/${permissionSchemeId}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq  
   fi
   ;;
 
 "csv")
   printf "id,name,description\n"
-  curl -s -X GET --url "${ac_url}permissionscheme" -u "${ac_user}" -H "${h_a_json}" | jq -r '.permissionSchemes | map([.id, .name, .description] | join (",")) | join("\n")'
+  curl -s -X GET --url "${acp_URL_JIRA3}permissionscheme" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.permissionSchemes | map([.id, .name, .description] | join (",")) | join("\n")'
   ;;
 
 "getPermissionGrants")
@@ -128,7 +128,7 @@ case $1 in
   printf "permissionSchemeId,accountId,permission,requestResponse\n"
   for permissionSchemeId in ${permissionSchemeIds}; do
     printf "%u,%s,%s," ${permissionSchemeId} ${accountId} ${permission}
-    http_response=`curl -i -s -X POST --url "${ac_url}permissionscheme/${permissionSchemeId}/permission" -u "${ac_user}" -H "${h_a_json}" -H "${h_ct_json}" --data "$(jq -n --arg accountId ${accountId} --arg permission ${permission} '{"holder": { "type": "user", "parameter": $accountId }, "permission": $permission}')"`
+    http_response=`curl -i -s -X POST --url "${acp_URL_JIRA3}permissionscheme/${permissionSchemeId}/permission" -u "${acp_AUTH}" -H "${acp_HA_JSON}" -H "${acp_HCT_JSON}" --data "$(jq -n --arg accountId ${accountId} --arg permission ${permission} '{"holder": { "type": "user", "parameter": $accountId }, "permission": $permission}')"`
     http_return_code=`echo $http_response | grep "^HTTP" | awk '{print $2}'`
     http_json_response=`echo $http_response | grep "^{"`
     if [ 201 -eq ${http_return_code} ]; then
@@ -183,7 +183,7 @@ case $1 in
         permissionId=`echo ${filteredPermissionGrant} | awk -F ',' '{print $2}'`
         echo -n ${filteredPermissionGrant}
         if [[ $COMMIT == "Yes" ]]; then
-          http_response=`curl -i -s -X DELETE --url "${ac_url}permissionscheme/${permissionSchemeId}/permission/${permissionId}" -u "${ac_user}"`
+          http_response=`curl -i -s -X DELETE --url "${acp_URL_JIRA3}permissionscheme/${permissionSchemeId}/permission/${permissionId}" -u "${acp_AUTH}"`
           http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
           http_json_string=$(echo $http_response | grep "^{")
           if [ 204 -eq ${http_return_code} ]; then
@@ -201,7 +201,7 @@ case $1 in
   ;;
 
 "delete")
-  typeset -r deleteLogFile="ajcPS_DeleteLog_${timestampDateOnly}T${timestampTimeOnly}.csv"
+  typeset -r deleteLogFile="ajcPS_DeleteLog_${acp_TS_DATE}T${acp_TS_TIME}.csv"
   if [ -z $2 ]; then
     print_command_usage $1 "(permissionSchemeId | X)"
     exit
@@ -214,7 +214,7 @@ case $1 in
   fi
   for permissionSchemeId in ${permissionSchemeIds}; do
     printf "%s," ${permissionSchemeId} | tee -a ${deleteLogFile}
-    http_response=`curl -i -s -X DELETE --url "${ac_url}permissionscheme/${permissionSchemeId}" -u "${ac_user}"`
+    http_response=`curl -i -s -X DELETE --url "${acp_URL_JIRA3}permissionscheme/${permissionSchemeId}" -u "${acp_AUTH}"`
     http_return_code=`echo $http_response | grep "^HTTP" | awk '{print $2}'`
     http_json_string=`echo $http_response | grep "^{"`
     if [ 204 -eq ${http_return_code} ]; then

@@ -1,6 +1,6 @@
 #!/bin/zsh
 # https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-resolutions/#api-rest-api-3-resolution-search-get
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 declare -a available_keywords=("count" "jsonObjectKeys" "csv" "json" "delete" "help")
 if [[ -z $1 ]]; then; user_keyword="hugo"; else; user_keyword=$1; fi
 if ! is_keyword_valid ${user_keyword} ${available_keywords[@]}; then; exit 0; fi
@@ -9,7 +9,7 @@ integer G_count
 integer G_numPages
 
 function count() {
-  typeset -r json_response=`curl -s -X GET --url "${ac_url}resolution/search" -u "${ac_user}" -H "${h_a_json}" | jq`
+  typeset -r json_response=`curl -s -X GET --url "${acp_URL_JIRA3}resolution/search" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq`
   G_count=`echo ${json_response} | jq '.total'`
   G_numPages=${G_count}/${G_maxResults}
 }
@@ -21,7 +21,7 @@ case $1 in
   ;;
 
 "jsonObjectKeys")
-  curl -s -X GET --url "${ac_url}resolution/search" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[0] | keys_unsorted | .[]' | awk 'BEGIN {print "Root keys:"}; {print "  " $1}'
+  curl -s -X GET --url "${acp_URL_JIRA3}resolution/search" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.values[0] | keys_unsorted | .[]' | awk 'BEGIN {print "Root keys:"}; {print "  " $1}'
   ;;
 
 "csv")
@@ -29,7 +29,7 @@ case $1 in
   printf "id,name,description,isDefault\n"
   for page in `seq 0 ${G_numPages}`; do
     integer startIndex=${page}*${G_maxResults}
-    curl -s -X GET --url "${ac_url}resolution/search?startAt=${startIndex}&maxResults=${G_maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[] | [ (.id|tonumber), .name, .description[0:80], .isDefault ] | @csv'
+    curl -s -X GET --url "${acp_URL_JIRA3}resolution/search?startAt=${startIndex}&maxResults=${G_maxResults}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.values[] | [ (.id|tonumber), .name, .description[0:80], .isDefault ] | @csv'
   done  
   ;;
 
@@ -37,13 +37,13 @@ case $1 in
   count
   for page in `seq 0 ${G_numPages}`; do
     integer startIndex=${page}*${G_maxResults}
-    curl -s -X GET --url "${ac_url}resolution/search?startAt=${startIndex}&maxResults=${G_maxResults}" -u "${ac_user}" -H "${h_a_json}" | jq '.values[]'
+    curl -s -X GET --url "${acp_URL_JIRA3}resolution/search?startAt=${startIndex}&maxResults=${G_maxResults}" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq '.values[]'
   done
   ;;
 
 "delete")
 # https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-resolutions/#api-rest-api-3-resolution-id-delete
- typeset -r deleteLogFile="ajcResolution_DeleteLog_${timestampDateOnly}T${timestampTimeOnly}.csv"
+ typeset -r deleteLogFile="ajcResolution_DeleteLog_${acp_TS_DATE}T${acp_TS_TIME}.csv"
   if [ -z $2 ]; then
     print_command_usage $1 "resolutionId"
     exit
@@ -55,7 +55,7 @@ case $1 in
     exit
   fi
   printf "%u," ${resolutionId} | tee -a ${deleteLogFile}
-  http_response=`curl -i -s -X DELETE --url "${ac_url}resolution/${resolutionId}" --user "${ac_user}"`
+  http_response=`curl -i -s -X DELETE --url "${acp_URL_JIRA3}resolution/${resolutionId}" --user "${acp_AUTH}"`
   http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
   if [ $http_return_code -eq 204 ]; then
     printf "deleted\n" | tee -a ${deleteLogFile}

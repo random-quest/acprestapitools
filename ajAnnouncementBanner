@@ -1,17 +1,58 @@
 #!/bin/zsh
 # based on https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-announcement-banner/#api-group-announcement-banner
-source ac_lib `basename $0`
-declare -a available_keywords=("get" "set" "reset")
-if [[ -z $1 ]]; then; user_keyword="hugo"; else; user_keyword=$1; fi
-if ! is_keyword_valid ${user_keyword} ${available_keywords[@]}; then; exit 0; fi
+source acp_lib `basename $0`
+typeset -A subCommandUsages
+subCommandUsages+=([get]="Get announcementBanner. Usage:\n$acp_command %s [-v]\n")
+subCommandUsages+=([set]="Set announcementBanner. Usage:\n$acp_command %s [-v] \"<anncouncementBanner text>\"\n")
+subCommandUsages+=([reset]="Reset announcementBanner. Usage:\n$acp_command %s [-v]\n")
 
-case $1 in
+
+function ac_Print_Help() {
+  printf "\nsubCommands for %s:\n\n" $acp_command
+  for command commandUsage in ${(kv)subCommandUsages}; do
+    printf "%s - " $command
+    printf "${commandUsage}\n" ${command}
+  done
+  tabs -15
+  printf "Options:\n"
+  printf "  -v\tverbose mode\n"
+  printf "\n%s usage examples:\n\n" $acp_command
+  tabs -5
+  tabs -8
+}
+
+
+case ${1:l} in
 "get")
-  eval $(ac_get_simple announcementBanner) | jq
+  subCommand=${1:l}
+  shift
+  zmodload zsh/zutil
+  zparseopts -D -F -K {v,-verbose}=flag_verbose
+  if [ $? -gt 0 ]; then
+    printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+    exit
+  fi
+  curl_command="curl -i -s -X GET --url \"${acp_URL_JIRA3}announcementBanner\" -u ${acp_AUTH} -H ${acp_HA_JSON}"
+  if [ -v flag_verbose ]; then
+    echo $curl_command
+  fi
+  acp_HTTP_PARSE "`eval ${curl_command}`"
+  if [ $acp_HTTP_RETURN_CODE -eq 200 ]; then
+    echo $acp_JSON_STRING | jq
+  else
+    errorMessage="Unspecified"
+    if [ $acp_HTTP_RETURN_CODE -eq 401 ]; then
+      errorMessage="Unauthorized"
+    fi
+    if [ $acp_HTTP_RETURN_CODE -eq 403 ]; then
+      errorMessage="Forbidden"
+    fi
+    printf "%u,%s\n" $acp_HTTP_RETURN_CODE $errorMessage
+  fi
   ;;
 
 "set")
-  curl -s -X PUT --url "${ac_url}announcementBanner" -u ${ac_user} -H ${h_a_json} -H ${h_ct_json} --data "$(jq -n --arg p "$2" '{
+  curl -s -X PUT --url "${acp_URL_JIRA3}announcementBanner" -u ${acp_AUTH} -H ${acp_HA_JSON} -H ${acp_HCT_JSON} --data "$(jq -n --arg p "$2" '{
     "visibility": "public",
     "isEnabled": true,
     "isDismissible": false,
@@ -19,11 +60,15 @@ case $1 in
   ;;
 
 "reset")
-  curl -i -s -X PUT --url "${ac_url}announcementBanner" -u ${ac_user} -H ${h_a_json} -H ${h_ct_json} --data "$(jq -n --arg p "$2" '{
+  curl -i -s -X PUT --url "${acp_URL_JIRA3}announcementBanner" -u ${acp_AUTH} -H ${acp_HA_JSON} -H ${acp_HCT_JSON} --data "$(jq -n --arg p "$2" '{
     "visibility": "private",
     "isEnabled": false,
     "isDismissible": false,
     "message": "" }')" | grep -E "^HTTP" | awk '{print "Response Code:", $2}'
+  ;;
+
+*)
+  ac_Print_Help
   ;;
 esac
 

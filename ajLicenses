@@ -1,6 +1,6 @@
 #!/bin/zsh
 # https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-server-info/#api-group-server-info
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 typeset -A commandUsages
 commandUsages+=([csv]="%s:\t\texports licensing information in csv format.\n\t\tArguments: none\n")
 
@@ -8,14 +8,14 @@ typeset -r availableSites="$HOME/conf/atlassian_cloud_available_site_names"
 
 case $1 in
 "listKeys")
-  curl -s -X GET --url "${ac_url}instance/license" -u "${ac_user}" -H  "${h_a_json}" | jq -r '.applications[0] | keys_unsorted | .[]'
+  curl -s -X GET --url "${acp_URL_JIRA3}instance/license" -u "${acp_AUTH}" -H  "${acp_HA_JSON}" | jq -r '.applications[0] | keys_unsorted | .[]'
   ;;
 
 "csv")
   printf "sitename,JSW,JSM,JWM\n"
   cat ${availableSites} | while read sitename; do
     site_restUrl="https://${sitename}.atlassian.net/rest/api/3/instance/license"
-    http_response=`curl -i -s -X GET --url "${site_restUrl}" -u ${ac_user} -H ${h_a_json}`
+    http_response=`curl -i -s -X GET --url "${site_restUrl}" -u ${acp_AUTH} -H ${acp_HA_JSON}`
     http_return_code=`echo $http_response | grep "^HTTP" | awk '{print $2}'`
     json_response=`echo $http_response | grep -E "^{"`
     if [ ${http_return_code} -eq 200 ]; then

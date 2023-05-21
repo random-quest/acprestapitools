@@ -1,8 +1,8 @@
 #!/bin/zsh
 # https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-workflow-schemes/#api-rest-api-3-workflowscheme-get
-source ac_lib `basename $0`
+source acp_lib `basename $0`
 function getAvailableKeys() {  
-  availableKeysArray=(`curl -s -X GET --url "${ac_url}workflowscheme" -u "${ac_user}" -H "${h_a_json}" | jq -r '.values[0] | keys_unsorted | .[]'`)
+  availableKeysArray=(`curl -s -X GET --url "${acp_URL_JIRA3}workflowscheme" -u "${acp_AUTH}" -H "${acp_HA_JSON}" | jq -r '.values[0] | keys_unsorted | .[]'`)
   stringOfAvailableKeys=$(printf "(%s)" ${(j: | :)availableKeysArray})
 }
 getAvailableKeys
@@ -20,7 +20,7 @@ integer recordCount
 integer numPages
 
 function count() {
-  recordCount=`curl -s -X GET --url "${ac_url}workflowscheme" -u "$ac_user" -H "$h_a_json" | jq '.total'`
+  recordCount=`curl -s -X GET --url "${acp_URL_JIRA3}workflowscheme" -u "$acp_AUTH" -H "$acp_HA_JSON" | jq '.total'`
   numPages=${recordCount}/${maxResults}
 }
 
@@ -31,7 +31,7 @@ function getAllValuesForKey() {
     integer local_pageCounter
     for local_pageCounter in {0..$numPages}; do
       local_startIndex=${local_pageCounter}*${maxResults}
-      curl -s -X GET --url "${ac_url}workflowscheme?startAt=${local_startIndex}&maxResults=${maxResults}" -u "$ac_user" -H "$h_a_json" | jq -r --arg key $1 '.values[][$key]'
+      curl -s -X GET --url "${acp_URL_JIRA3}workflowscheme?startAt=${local_startIndex}&maxResults=${maxResults}" -u "$acp_AUTH" -H "$acp_HA_JSON" | jq -r --arg key $1 '.values[][$key]'
     done
   else
     printf "getAllValuesForKey() needs \"key\" parameter\n"
@@ -81,7 +81,7 @@ case ${1:l} in
   #
   for Id in ${option_IDs}; do
     # https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-filters/#api-rest-api-3-filter-id-get
-    http_response=`curl -i -s -X GET --url "${ac_url}workflowscheme/${Id}" -u "$ac_user" -H "$h_a_json"`
+    http_response=`curl -i -s -X GET --url "${acp_URL_JIRA3}workflowscheme/${Id}" -u "$acp_AUTH" -H "$acp_HA_JSON"`
     http_return_code=`echo $http_response | grep "^HTTP" | awk '{print $2}'`
     http_json_string=`echo $http_response | grep "^{"`
     if [ $http_return_code -eq 200 ]; then
@@ -102,7 +102,7 @@ case ${1:l} in
   printf "id,name,description\n"
   for pageCounter in {0..$numPages}; do
     startIndex=${pageCounter}*${maxResults}
-    curl -s -X GET --url "${ac_url}workflowscheme?startAt=${startIndex}&maxResults=${maxResults}" --user "${ac_user}" --header "${h_a_json}" | jq -r '.values[] | [ .id, .name, .description ] | @csv'
+    curl -s -X GET --url "${acp_URL_JIRA3}workflowscheme?startAt=${startIndex}&maxResults=${maxResults}" --user "${acp_AUTH}" --header "${acp_HA_JSON}" | jq -r '.values[] | [ .id, .name, .description ] | @csv'
   done
   ;;
 
@@ -121,7 +121,7 @@ case ${1:l} in
       if [ ! -z ${Array_Id_Name[$OPTARG]} ]; then
         option_Array_Id_Name+=([$OPTARG]=${(v)Array_Id_Name[$OPTARG]})
       else
-        printf "%s:\tid %s not valid\n" ${ac_command} $OPTARG
+        printf "%s:\tid %s not valid\n" ${acp_command} $OPTARG
         exit
       fi
       ;;
@@ -161,11 +161,11 @@ case ${1:l} in
   #
   # delete - main
   #
-  typeset -r LogFile="${ac_command}_${subCommand}_log_${timestampDateOnly}T${timestampTimeOnly}.csv"
+  typeset -r LogFile="${acp_command}_${subCommand}_log_${acp_TS_DATE}T${acp_TS_TIME}.csv"
   printf "id,name,result\n" | tee -a ${LogFile}
   for Id Name in ${(kv)option_Array_Id_Name}; do
     printf "%u,%s," ${Id} ${Name}| tee -a ${LogFile}
-    http_response=`curl -i -s -X DELETE --url "${ac_url}workflowscheme/${Id}" --user "${ac_user}"`
+    http_response=`curl -i -s -X DELETE --url "${acp_URL_JIRA3}workflowscheme/${Id}" --user "${acp_AUTH}"`
     http_return_code=$(echo $http_response | grep "^HTTP" | awk '{print $2}')
     if [ $http_return_code -eq 204 ]; then
       printf "deleted\n" | tee -a ${LogFile}

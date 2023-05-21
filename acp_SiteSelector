@@ -7,7 +7,7 @@ typeset -A Array_sitenames
 function populate_Array_sitenames() {
 	integer local_Index=0
 	typeset local_Line
-	cat "$HOME/conf/atlassian_cloud_available_site_names" | sort | while read local_Line; do
+	cat "$acp_tools_available_sites_file" | sort | while read local_Line; do
 		if [ ! -z ${local_Line} ]; then
 			Array_sitenames+=([${local_Index}]=${local_Line})
 			local_Index+=1
@@ -18,7 +18,7 @@ function populate_Array_sitenames() {
 function isExistsSiteName() {
   if [ ! -z $1 ]; then
   	# FIXME does this work when only wiki is an active product?
-    http_return_code=`curl -i -s -X GET --url "https://$1.atlassian.net/rest/api/3/serverInfo" ${ac_AUTH} ${acHA_JSON} | grep "^HTTP" | awk '{print $2}'`
+    http_return_code=`curl -i -s -X GET --url "https://$1.atlassian.net/rest/api/3/serverInfo" ${acp_AUTH} ${acp_HA_JSON} | grep "^HTTP" | awk '{print $2}'`
     if [ ${http_return_code} -eq 200 ]; then
       return 0
     else
@@ -34,7 +34,7 @@ if [ -z $1 ]; then
 	integer maxIndex=${#Array_sitenames[@]}-1
 	for index_Sitename in {0..${maxIndex}}; do
 		printf "%2d" ${index_Sitename}
-		if [[ ${ac_SITE_NAME} == ${(v)Array_sitenames[${index_Sitename}]} ]]; then
+		if [[ ${acp_SITE_NAME} == ${(v)Array_sitenames[${index_Sitename}]} ]]; then
 			printf "*"
 		else
 			printf " "
@@ -44,7 +44,7 @@ if [ -z $1 ]; then
 	done
 	vared -p "Activate project: " -c temp_User_Response
 	if [[ ${temp_User_Response} =~ '^[0-9]+$' ]]; then
-		echo ${(v)Array_sitenames[${temp_User_Response}]} > $HOME/conf/atlassian_cloud_site_name
+		echo ${(v)Array_sitenames[${temp_User_Response}]} > $acp_tools_active_site_file
 	fi
 	unset temp_User_Response
 	acp_lib env
@@ -60,14 +60,14 @@ case $1 in
  *)
 	for sitename in ${(v)Array_sitenames}; do
 		if [[ $1 == ${sitename} ]]; then
-			echo $1 > $HOME/conf/atlassian_cloud_site_name
+			echo $1 > $acp_tools_active_site_file
 			exit
 		fi
 	done
 	isExistsSiteName $1
 	if [ $? -eq 0 ]; then
-		echo $1 >> $HOME/conf/atlassian_cloud_available_site_names
-		echo $1 > $HOME/conf/atlassian_cloud_site_name
+		echo $1 >> $acp_tools_available_sites_file
+		echo $1 > $acp_tools_active_site_file
 	else
 		printf "unable to access %s.\n" $1
 	fi
