@@ -1,0 +1,56 @@
+#!/bin/zsh
+source acp_lib `basename $0`
+
+typeset -A Array_usernames
+
+function populate_Array_userames() {
+	integer local_Index=0
+	typeset local_Line
+	cat "$acp_tools_available_users_file" | sort | while read local_Line; do
+		if [ ! -z ${local_Line} ]; then
+			Array_usernames+=([${local_Index}]=${local_Line})
+			local_Index+=1
+		fi
+	done
+}
+
+populate_Array_usernames
+
+if [ -z $1 ]; then
+	# enter interactive mode
+	integer maxIndex=${#Array_usernames[@]}-1
+	for index_Username in {0..${maxIndex}}; do
+		printf "%2d" ${index_Username}
+		if [[ ${acp_USER_NAME} == ${(v)Array_usernames[${index_Username}]} ]]; then
+			printf "*"
+		else
+			printf " "
+		fi
+		printf "- %s" ${(v)Array_usernames[${index_Username}]}
+		printf "\n"
+	done
+	vared -p "Activate User: " -c temp_User_Response
+	if [[ ${temp_User_Response} =~ '^[0-9]+$' ]]; then
+		echo ${(v)Array_usernames[${temp_User_Response}]} > $acp_tools_active_user_file
+	fi
+	unset temp_User_Response
+	acp_lib env
+	exit
+fi
+
+case $1 in
+"help")
+  printf "\nHelp for %s commands:\n\n" $acp_command
+  printf "%s\t\t\tinteractive mode\n" $acp_command
+  printf "%s <userName>\tmakes <userName> the active user\n" $acp_command
+  ;;
+ *)
+	for username in ${(v)Array_usernames}; do
+		if [[ $1 == ${username} ]]; then
+			echo $1 > $acp_tools_active_user_file
+			exit
+		fi
+	done
+	# FIXME could add a new user user, and ask for input of PAT.
+	# FIXME add function to test if user has access
+esac
