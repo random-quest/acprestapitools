@@ -5,8 +5,25 @@ typeset -r acp_tools_app_name="acprestapitools"
 typeset -r acp_tools_configuration_dir="$HOME/.$acp_tools_app_name/"
 typeset -r acp_tools_active_site_file="$acp_tools_configuration_dir/acp_active_site"
 typeset -r acp_tools_available_sites_file="$acp_tools_configuration_dir/acp_available_sites"
+typeset -r acp_tools_active_user_file="$acp_tools_configuration_dir/acp_active_user"
+typeset -r acp_tools_available_users_file="$acp_tools_configuration_dir/acp_available_users"
+
+if [ ! -d $acp_tools_configuration_dir ]; then
+  printf "New deployment. Creating configuration directory: \"%s\".\n" $acp_tools_configuration_dir
+  mkdir -p $acp_tools_configuration_dir
+  printf "<siteName>\n" > $acp_tools_available_sites_file
+  printf "<siteName>\n" > $acp_tools_active_site_file
+  printf "<Email>,<PAT>\n" > $acp_tools_available_users_file
+  printf "<Email>\n" > $acp_tools_active_user_file
+fi
+
+if [ ! -f $acp_tools_active_site_file -o ! -f $acp_tools_active_user_file ]; then
+  printf "No active site or user found in %s or %s, respectively.\n" $acp_tools_active_site_file $acp_tools_active_user_file
+  return
+fi
 
 typeset -r acp_SITE_NAME=$(cat $acp_tools_active_site_file)
+typeset -r acp_USER_NAME=$(cat $acp_tools_active_user_file)
 
 # Atlassian Cloud Platform REST API base URLs
 typeset -r acp_URL_SITE="https://${acp_SITE_NAME}.atlassian.net/"
@@ -14,7 +31,8 @@ typeset -r acp_URL_JIRA3="${acp_URL_SITE}rest/api/3/"
 typeset -r acp_URL_SD="${acp_URL_SITE}rest/servicedeskapi/"
 typeset -r acp_URL_WIKI2="${acp_URL_SITE}wiki/api/v2/"
 
-typeset -r acp_AUTH=$(cat $acp_tools_configuration_dir/acp_username):$(cat $acp_tools_configuration_dir/acp_token)
+# Atlassian Access User
+typeset -r acp_AUTH="$acp_USER_NAME:$(cat $acp_tools_available_users_file | grep $acp_USER_NAME | awk -F ',' '{print$2}')"
 
 # HTTP header constants
   # accept json
@@ -36,7 +54,7 @@ typeset -r acp_TS_TIME="`date +%H-%M-%S`"
 typeset -r acp_TS_DATETIME="`date +%Y-%m-%dT%H-%M-%S`"
 
 # Paging Limits
-typeset -Ar ac_LIM=([Min]=1 [Max]=250)
+typeset -Ar acp_LIM=([Min]=1 [Max]=250)
 
 # Confluence Cloud Constants
 typeset -Ar acp_SPACE_STATUS=([current]="&status=current" [archived]="&status=archived" [all]="")
@@ -47,6 +65,8 @@ typeset -Ar acp_PAGE_BODYFORMAT=([storage]="" [atlas_doc_format]="")
 typeset -Ar acp_PAGE_AVAILABLE_KEYS=([id]="id" [status]="status" [title]="title" [spaceId]="spaceId" [parentId]="parentId" [authorId]="authorId" [createdAt]="createdAt")
 typeset -Ar acp_LABEL_PREFIX=([my]="" [team]="" [global]="" [system]="")
 typeset -Ar acp_LABEL_AVAILABLE_KEYS=([id]="id" [name]="name" [prefix]="prefix")
+typeset -Ar acp_ATTACHMENT_AVAILABLE_KEYS=([id]="id" [status]="status" [title]="title" [mediaType]="mediaType" [mediaTypeDescription]="mediaTypeDescription" [comment]="comment" [fileSize]="fileSize" [webuiLink]="webuiLink" [downloadLink]="downloadLink")
+
 
 function ac_get_simple() {
   printf "curl -s -X GET --url \"%s%s\" -u %s -H %s" ${acp_URL_JIRA3} $1 ${acp_AUTH} ${acp_HA_JSON}
@@ -93,6 +113,6 @@ if [[ $1 = "env" ]]; then
   printf "JSW URL: %s\n" ${acp_URL_JIRA3}
   printf "JSM URL: %s\n" ${acp_URL_SD}
   printf "CNF URL: %s\n" ${acp_URL_WIKI2}
-  printf "Account: %s\n" $(cat $acp_tools_configuration_dir/acp_username)
+  printf "Account: %s\n" ${acp_AUTH}
 fi
 

@@ -7,16 +7,16 @@ while read -t 1 -u 0 line; do
 done
 
 source acp_lib `basename $0`
-typeset -A commandUsages
-commandUsages+=([count]="Count the number of pages. Usage:\n$acp_command %s ([--spaceId <spaceId> ...] | [--labelId <labelId> ...])\n")
-commandUsages+=([json]="Retrieve data in json format. Usage:\n$acp_command %s ([--spaceId <spaceId> ...] | [--labelId <labelId> ...])\n")
-commandUsages+=([csv]="Retrieves data in csv format. Usage:\n$acp_command %s ([--spaceId <spaceId> ...] | [--lableId <labelId> ...]) [--column <key>0...3] [--header (true | false)]\n\tavailable keys: $(printf "(%s)" ${(kj: | :)acp_PAGE_AVAILABLE_KEYS})\n")
+typeset -A subCommandUsages
+subCommandUsages+=([count]="Count the number of pages. Usage:\n$acp_command %s ([--spaceId <spaceId> ...] | [--labelId <labelId> ...])\n")
+subCommandUsages+=([json]="Retrieve data in json format. Usage:\n$acp_command %s ([--spaceId <spaceId> ...] | [--labelId <labelId> ...])\n")
+subCommandUsages+=([csv]="Retrieves data in csv format. Usage:\n$acp_command %s ([--spaceId <spaceId> ...] | [--lableId <labelId> ...]) [--column <key>0...3] [--header (true | false)]\n\tavailable keys: $(printf "(%s)" ${(kj: | :)acp_PAGE_AVAILABLE_KEYS})\n")
 
 function ac_Print_Help() {
   printf "\nHelp for %s commands:\n\n" $acp_command
-  for command commandUsage in ${(kv)commandUsages}; do
-    printf "%s - " $command
-    printf "${commandUsage}\n" ${command}
+  for subCommand subCommandUsage in ${(kv)subCommandUsages}; do
+    printf "%s - " $subCommand
+    printf "${subCommandUsage}\n" ${subCommand}
   done
   tabs -15
   printf "Valid values:\n"
@@ -72,16 +72,16 @@ if [[ ${1:l} == "count" || ${1:l} == "json" || ${1:l} == "csv" ]]; then
   populate_option_Id_from_STDIN
   zparseopts -D -F -K  {v,-verbose}=flag_verbose -column+:=option_columns -header=flag_csv_header -spaceId+:=option_Id -labelId+:=option_Id -pageId+:=option_pageId -bodyFormat:=option_bodyFormat
   if [ $? -gt 0 ]; then
-    printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+    printf ${subCommandUsages[${subCommand}]} ${(k)subCommandUsages[${subCommand}]}
     exit
   fi
   if [ ${#option_columns[@]} -gt 6 ]; then
-    printf "maximum num of --column options exceeded\n${commandUsages[${subCommand}]}" ${(k)commandUsages[${subCommand}]}
+    printf "maximum num of --column options exceeded\n${subCommandUsages[${subCommand}]}" ${(k)subCommandUsages[${subCommand}]}
     exit
   fi
   for opt column in $option_columns; do
     if [ -z ${(k)acp_PAGE_AVAILABLE_KEYS[${column}]} ]; then
-      printf "unmatched --column\n${commandUsages[${subCommand}]}" ${(k)commandUsages[${subCommand}]}
+      printf "unmatched --column\n${subCommandUsages[${subCommand}]}" ${(k)subCommandUsages[${subCommand}]}
       exit
     else
       option_columns_headers+=",${(k)acp_PAGE_AVAILABLE_KEYS[${column}]}"
@@ -134,7 +134,7 @@ if [[ ${1:l} == "count" || ${1:l} == "json" || ${1:l} == "csv" ]]; then
         fi
         ;;
     esac
-    integer --r ac_LIMIT=${(v)ac_LIM[Max]}
+    integer --r acp_LIMIT=${(v)acp_LIM[Max]}
     for opt value in $option_Id; do
       # determine endpoint
       case $opt in
@@ -152,7 +152,7 @@ if [[ ${1:l} == "count" || ${1:l} == "json" || ${1:l} == "csv" ]]; then
       acp_ACC_LINK_REL="next"
       while [ ! -z $acp_ACC_LINK ] && [[ $acp_ACC_LINK_REL == "next" ]]; do
         if [[ $acp_ACC_LINK == "init" ]]; then
-          curl_command="curl -i -s -X GET --url \"${acp_URL_WIKI2}${rest_endpoint}?limit=${ac_LIMIT}&${param_bodyformat}\" -u ${acp_AUTH} -H ${acp_HA_JSON}" 
+          curl_command="curl -i -s -X GET --url \"${acp_URL_WIKI2}${rest_endpoint}?limit=${acp_LIMIT}&${param_bodyformat}\" -u ${acp_AUTH} -H ${acp_HA_JSON}" 
           if [ -v flag_verbose ]; then
             echo $curl_command
           fi

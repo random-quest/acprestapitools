@@ -1,17 +1,17 @@
 #!/bin/zsh
 # https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-space/#api-group-space
 source acp_lib `basename $0`
-typeset -A commandUsages
-commandUsages+=([count]="Count the number of spaces. Usage:\n$acp_command %s [--status <status>] [--type <type>]\n")
-commandUsages+=([json]="Retrieve data in json format. Usage:\n$acp_command %s [--status <status>] [--type <type>]\n")
-commandUsages+=([csv]="Retrieve data in csv format. Usage:\n$acp_command %s [--status <status>] [--type <type>] [--column <key>0...3]\n\tavailable keys: $(printf "(%s)" ${(kj: | :)acp_SPACE_AVAILABLE_KEYS})\n")
-commandUsages+=([delete]="Delete Space(s). [STDIN spaceKeys]. Usage:\n$acp_command %s -i <spaceKey n> [-v] [-s] -j <async_TaskId n>\n")
+typeset -A subCommandUsages
+subCommandUsages+=([count]="Count the number of spaces. Usage:\n$acp_command %s [-v] [--status <status>] [--type <type>]\n")
+subCommandUsages+=([json]="Retrieve data in json format. Usage:\n$acp_command %s [-v] [--status <status>] [--type <type>]\n")
+subCommandUsages+=([csv]="Retrieve data in csv format. Usage:\n$acp_command %s [-v] [--status <status>] [--type <type>] [--column <key>0...3]\n\tavailable keys: $(printf "(%s)" ${(kj: | :)acp_SPACE_AVAILABLE_KEYS})\n")
+subCommandUsages+=([delete]="Delete Space(s). [STDIN spaceKeys]. Usage:\n$acp_command %s [-v] ((--spaceId <spaceId> | --deleteall ) | --deletionstatus)\n")
 
 function ac_Print_Help() {
   printf "\nHelp for %s commands:\n\n" $acp_command
-  for command commandUsage in ${(kv)commandUsages}; do
-    printf "%s - " $command
-    printf "${commandUsage}\n" ${command}
+  for subCommand subCommandUsage in ${(kv)subCommandUsages}; do
+    printf "%s - " $subCommand
+    printf "${subCommandUsage}\n" ${subCommand}
   done
   tabs -15
   printf "Options:\n"
@@ -75,25 +75,25 @@ if [[ ${1:l} == "count" || ${1:l} == "json" || ${1:l} == "csv" ]]; then
   zmodload zsh/zutil
   zparseopts -D -F -K {v,-verbose}=flag_verbose -status:=option_status -type:=option_type -column+:=option_column
   if [ $? -gt 0 ]; then
-    printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+    printf ${subCommandUsages[${subCommand}]} ${(k)subCommandUsages[${subCommand}]}
     exit
   fi
   # validate options
   if [ -z ${(k)acp_SPACE_STATUS[${option_status[2]}]} ]; then
-    printf "invalid status\n${commandUsages[${subCommand}]}" ${(k)commandUsages[${subCommand}]}
+    printf "invalid status\n${subCommandUsages[${subCommand}]}" ${(k)subCommandUsages[${subCommand}]}
     exit
   fi
   if [ -z  ${(k)acp_SPACE_TYPE[${option_type[2]}]} ]; then
-    printf "invalid type\n${commandUsages[${subCommand}]}" ${(k)commandUsages[${subCommand}]}
+    printf "invalid type\n${subCommandUsages[${subCommand}]}" ${(k)subCommandUsages[${subCommand}]}
     exit
   fi
   if [ ${#option_column[@]} -gt 6 ]; then
-    printf "maximum num of --column options exceeded\n${commandUsages[${subCommand}]}" ${(k)commandUsages[${subCommand}]}
+    printf "maximum num of --column options exceeded\n${subCommandUsages[${subCommand}]}" ${(k)subCommandUsages[${subCommand}]}
     exit
   fi
   for opt column in $option_column; do
     if [ -z ${(k)acp_SPACE_AVAILABLE_KEYS[${column}]} ]; then
-      printf "bad column\n${commandUsages[${subCommand}]}" ${(k)commandUsages[${subCommand}]}
+      printf "bad column\n${subCommandUsages[${subCommand}]}" ${(k)subCommandUsages[${subCommand}]}
       exit
     else
       option_column_headers+=",${(k)acp_SPACE_AVAILABLE_KEYS[${column}]}"
@@ -115,10 +115,10 @@ if [[ ${1:l} == "count" || ${1:l} == "json" || ${1:l} == "csv" ]]; then
   # Main loop
   acp_ACC_LINK="init"
   acp_ACC_LINK_REL="next"
-  integer -r ac_LIMIT=${(v)ac_LIM[Max]}
+  integer -r acp_LIMIT=${(v)acp_LIM[Max]}
   while [ ! -z $acp_ACC_LINK ] && [[ $acp_ACC_LINK_REL == "next" ]]; do
     if [[ $acp_ACC_LINK == "init" ]]; then
-      curl_command="curl -i -s -X GET --url \"${acp_URL_WIKI2}spaces?limit=${ac_LIMIT}${(v)acp_SPACE_STATUS[${option_status[2]}]}${(v)acp_SPACE_TYPE[${option_type[2]}]}\" -u ${acp_AUTH} -H ${acp_HA_JSON}"
+      curl_command="curl -i -s -X GET --url \"${acp_URL_WIKI2}spaces?limit=${acp_LIMIT}${(v)acp_SPACE_STATUS[${option_status[2]}]}${(v)acp_SPACE_TYPE[${option_type[2]}]}\" -u ${acp_AUTH} -H ${acp_HA_JSON}"
       if [ -v flag_verbose ]; then
         echo $curl_command
       fi
@@ -173,7 +173,7 @@ case ${1:l} in
   zmodload zsh/zutil
   zparseopts -D -F -K {v,-verbose}=flag_verbose {s,-silent}=flag_silent -spaceId:=option_id  -deleteall=flag_deleteall -deletionstatus=flag_deletionstatus
   if [ $? -gt 0 ]; then
-    printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
+    printf ${subCommandUsages[${subCommand}]} ${(k)subCommandUsages[${subCommand}]}
     exit
   fi
   # populate id name array
@@ -182,7 +182,7 @@ case ${1:l} in
   done
   # validate other options
   if [ -v flag_deleteall -a -v flag_deletionstatus ]; then
-    printf "--deleteall and --deletionstatus are mutually exclusive.\n${commandUsages[${subCommand}]}" ${(k)commandUsages[${subCommand}]}
+    printf "--deleteall and --deletionstatus are mutually exclusive.\n${subCommandUsages[${subCommand}]}" ${(k)subCommandUsages[${subCommand}]}
     exit
   fi
 

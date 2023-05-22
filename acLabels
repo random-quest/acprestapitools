@@ -2,15 +2,15 @@
 # https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-label/#api-group-label
 source acp_lib `basename $0`
 typeset -A subCommandUsages
-subCommandUsages+=([count]="Count the number of labels. Usage:\n$acp_command %s ([--attachmentId <attachmentId> ...] | [--blogpostId <blogpostId> ...] | [--pageId <pageId> ...])\n")
-subCommandUsages+=([json]="Retrieve data in json format. Usage:\n$acp_command %s ([--spaceId <spaceId> ...] | [--labelId <labelId> ...])\n")
-subCommandUsages+=([csv]="Retrieves data in csv format. Usage:\n$acp_command %s ([--attachmentId <attachmentId> ...] | [--blogpostId <blogpostId> ...] | [--pageId <pageId> ...]) [--header (true | false)]\n\tavailable keys: $(printf "(%s)" ${(kj: | :)acp_LABEL_AVAILABLE_KEYS})\n")
+subCommandUsages+=([count]="Count the number of labels. Usage:\n$acp_command %s (--attachmentId <attachmentId> ... | --blogpostId <blogpostId> ... | --pageId <pageId> ...)\n")
+subCommandUsages+=([json]="Retrieve data in json format. Usage:\n$acp_command %s (--attachmentId <attachmentId> ... | --blogpostId <blogpostId> ... | --pageId <pageId> ...)\n")
+subCommandUsages+=([csv]="Retrieves data in csv format. Usage:\n$acp_command %s (--attachmentId <attachmentId> ... | --blogpostId <blogpostId> ... | --pageId <pageId> ...) [--header (true | false)]\n\tavailable keys: $(printf "(%s)" ${(kj: | :)acp_LABEL_AVAILABLE_KEYS})\n")
 
 function ac_Print_Help() {
   printf "\nHelp for %s commands:\n\n" $acp_command
-  for command commandUsage in ${(kv)subCommandUsages}; do
-    printf "%s - " $command
-    printf "${commandUsage}\n" ${command}
+  for subCommand subCommandUsage in ${(kv)subCommandUsages}; do
+    printf "%s - " $subCommand
+    printf "${subCommandUsage}\n" ${subCommand}
   done
   tabs -15
   printf "Valid values:\n"
@@ -25,7 +25,7 @@ if [[ ${1:l} == "count" || ${1:l} == "json" || ${1:l} == "csv" ]]; then
   shift
   zmodload zsh/zutil
   typeset -a flag_csv_header=("--header" "true")
-  zparseopts -D -F -K -header=flag_csv_header -attachmentId+:=option_Id -blogpostId+:=option_Id -pageId+:=option_Id
+  zparseopts -D -F -K {v,-verbose}=flag_verbose -header=flag_csv_header -attachmentId+:=option_Id -blogpostId+:=option_Id -pageId+:=option_Id
   if [ $? -gt 0 ]; then
     printf ${subCommandUsages[${subCommand}]} ${(k)subCommandUsages[${subCommand}]}
     exit
@@ -47,7 +47,7 @@ if [[ ${1:l} == "count" || ${1:l} == "json" || ${1:l} == "csv" ]]; then
   esac
 
   # Main loop
-  integer --r ac_LIMIT=${(v)ac_LIM[Max]}
+  integer --r acp_LIMIT=${(v)acp_LIM[Max]}
   for opt value in $option_Id; do
     # determine endpoint
     rest_endpoint=""
@@ -72,7 +72,7 @@ if [[ ${1:l} == "count" || ${1:l} == "json" || ${1:l} == "csv" ]]; then
     acp_ACC_LINK_REL="next"
     while [ ! -z $acp_ACC_LINK ] && [[ $acp_ACC_LINK_REL == "next" ]]; do
       if [[ $acp_ACC_LINK == "init" ]]; then
-        curl_command="curl -i -s -X GET --url \"${acp_URL_WIKI2}${rest_endpoint}?limit=${ac_LIMIT}\" -u ${acp_AUTH} -H ${acp_HA_JSON}" 
+        curl_command="curl -i -s -X GET --url \"${acp_URL_WIKI2}${rest_endpoint}?limit=${acp_LIMIT}\" -u ${acp_AUTH} -H ${acp_HA_JSON}" 
         if [ -v flag_verbose ]; then
           echo $curl_command
         fi
@@ -83,6 +83,10 @@ if [[ ${1:l} == "count" || ${1:l} == "json" || ${1:l} == "csv" ]]; then
           echo $curl_command
         fi
         acp_HTTP_PARSE "`eval ${curl_command}`"
+      fi
+      if [ $acp_HTTP_RETURN_CODE -eq 404 ]; then
+        printf "404,Not Found\n"
+        continue
       fi
       # work cursor
       case $subCommand in

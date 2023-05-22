@@ -1,12 +1,12 @@
 #!/bin/zsh
-# https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-space/#api-group-space
+# https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-attachment/#api-pages-id-attachments-get
 source acp_lib `basename $0`
-integer -r ac_LIMIT=250
-typeset -A commandUsages
-commandUsages+=([count]="%s:\t\tcounts the number of pages.\n\t\tArguments: <pageId>\n")
-commandUsages+=([valuesbykey]="%s:\tretrieves values for a key.\n\t\tArguments: <pageId> <key>\n\t\tavailable keys: (id|status|title|mediaType|mediaTypeDescription|comment|fileSize|webuiLink|downloadLink)\n\t\tvalid valaues for status: (current|trashed|historical|deleted|any|draft|archived)\n")
-commandUsages+=([json]="%s:\t\tretrievs pages in json format.\n\t\tArguments: <pageId>\n")
-commandUsages+=([csv]="%s:\t\tretrievs pages in csv format.\n\t\tArguments: <pageId>\n")
+
+typeset -A subCommandUsages
+subCommandUsages+=([count]="%s:\t\tcounts the number of attachments.\n\t\tArguments: <pageId>\n")
+subCommandUsages+=([json]="%s:\t\tretrievs pages in json format.\n\t\tArguments: <pageId>\n")
+subCommandUsages+=([csv]="%s:\t\tretrievs pages in csv format.\n\t\tArguments: <pageId>\n")
+
 
 function getValueByKey() {
   if [ ! -z $1 -a ! -z $2 ]; then
@@ -14,7 +14,7 @@ function getValueByKey() {
     acp_ACC_LINK_REL="next"
     while [[ ! -z $acp_ACC_LINK && $acp_ACC_LINK_REL == "next" ]]; do
       if [[ $acp_ACC_LINK == "init" ]]; then
-        acp_HTTP_PARSE "`curl -i -s -X GET --url "${acp_URL_WIKI2}pages/$1/attachments?limit=${ac_LIMIT}" -u "${acp_AUTH}" -H "${acp_HA_JSON}"`"
+        acp_HTTP_PARSE "`curl -i -s -X GET --url "${acp_URL_WIKI2}pages/$1/attachments?limit=${acp_LIMIT}" -u "${acp_AUTH}" -H "${acp_HA_JSON}"`"
       else
         acp_HTTP_PARSE "`curl -i -s -X GET --url "${acp_URL_JIRA3_SITE}${acp_ACC_LINK}" -u "${acp_AUTH}" -H "${acp_HA_JSON}"`"
       fi
@@ -28,27 +28,42 @@ function getValueByKey() {
 if [[ ${1:l} == "count" || ${1:l} == "json" || ${1:l} == "csv" ]]; then
   typeset subCommand=${1:l}
   shift
-  typeset -a option_pageIds
-  while getopts ":i:f:" opt; do
-    case $opt in
-    i)
-      option_pageIds+=$OPTARG
-      ;;
-    f)
-      if [ -f $OPTARG ]; then
-        option_pageIds=(`xsv select id $OPTARG | tail -n +2 | tr '\n' ' '`)
-      else
-        printf "file not found\n"
-        exit
-      fi
-      ;;
-    *)
-      printf ${commandUsages[${subCommand}]} ${(k)commandUsages[${subCommand}]}
-      exit  
-      ;;
-    esac
+  zmodload zsh/zutil
+  zparseopts -D -F -K {v,-verbose}=flag_verbose -column+:=option_column -pageId+:=option_id -inputFile:=option_filename
+  if [ $? -gt 0 ]; then
+    printf ${subCommandUsages[${subCommand}]} ${(k)subCommandUsages[${subCommand}]}
+    exit
+  fi
+  # populate array
+  typeset -a pageIds
+  for opt id in $option_id; do
+    pageIds+=("${id}")
   done
-  shift $((OPTIND-1))
+  if [ ${#option_filename} -gt 0 ]; then
+    if [ -f "${option_filename[2]}" ]; then
+      pageIds=(`xsv select id "${option_filename[2]}" | tail -n +2 | tr '\n' ' '`)
+    else
+      printf "file not found\n"
+      exit
+    fi
+  fi
+  if [ ${#pageIds} -eq 0 ]; then
+    printf "--pageId option is mandatory\n${subCommandUsages[${subCommand}]}" ${(k)subCommandUsages[${subCommand}]}
+    exit
+  fi
+  if [ ${#option_column[@]} -gt 6 ]; then
+    printf "maximum num of --column options exceeded\n${subCommandUsages[${subCommand}]}" ${(k)subCommandUsages[${subCommand}]}
+    exit
+  fi
+  for opt column in $option_column; do
+    if [ -z ${(k)acp_ATTACHMENT_AVAILABLE_KEYS[${column}]} ]; then
+      printf "bad column\n${subCommandUsages[${subCommand}]}" ${(k)subCommandUsages[${subCommand}]}
+      exit
+    else
+      option_column_headers+=",${(k)acp_ATTACHMENT_AVAILABLE_KEYS[${column}]}"
+    fi
+  done
+
   # Opening statements
   case $subCommand in
     "count")
@@ -59,15 +74,19 @@ if [[ ${1:l} == "count" || ${1:l} == "json" || ${1:l} == "csv" ]]; then
       ;;
   esac
   # Main loop
-  for pageId in $option_pageIds; do
+  for pageId in $pageIds; do
     acp_ACC_LINK="init"
     acp_ACC_LINK_REL="next"
     while [ ! -z $acp_ACC_LINK ] && [[ $acp_ACC_LINK_REL == "next" ]]; do
       if [[ $acp_ACC_LINK == "init" ]]; then
-        acp_HTTP_PARSE "`curl -i -s -X GET --url "${acp_URL_WIKI2}pages/$pageId/attachments?limit=${ac_LIMIT}" -u "${acp_AUTH}" -H "${acp_HA_JSON}"`"
+        curl_command="curl -i -s -X GET --url \"${acp_URL_WIKI2}pages/$pageId/attachments?limit=${acp_LIMIT}\" -u \"${acp_AUTH}\" -H \"${acp_HA_JSON}\""
       else
-        acp_HTTP_PARSE "`curl -i -s -X GET --url "${acp_URL_JIRA3_SITE}${acp_ACC_LINK}" -u "${acp_AUTH}" -H "${acp_HA_JSON}"`"
+        curl_command="curl -i -s -X GET --url \"${acp_URL_JIRA3_SITE}${acp_ACC_LINK}\" -u \"${acp_AUTH}\" -H \"${acp_HA_JSON}\""
       fi
+      if [ -v flag_verbose ]; then
+        echo $curl_command
+      fi
+      acp_HTTP_PARSE "`eval $curl_command`"
       # Work cursor
       case $subCommand in
       "count")

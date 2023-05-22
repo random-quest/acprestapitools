@@ -3,12 +3,12 @@ source acp_lib `basename $0`
 
 typeset -A Array_usernames
 
-function populate_Array_userames() {
+function populate_Array_usernames() {
 	integer local_Index=0
 	typeset local_Line
 	cat "$acp_tools_available_users_file" | sort | while read local_Line; do
 		if [ ! -z ${local_Line} ]; then
-			Array_usernames+=([${local_Index}]=${local_Line})
+			Array_usernames+=([${local_Index}]=`echo "${local_Line}" | cut -f 1 -d ','`)
 			local_Index+=1
 		fi
 	done
