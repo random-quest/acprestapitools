@@ -57,6 +57,7 @@ typeset -r acp_TS_DATETIME="`date +%Y-%m-%dT%H-%M-%S`"
 typeset -Ar acp_LIM=([Min]=1 [Max]=250)
 
 # Confluence Cloud Constants
+typeset -Ar acp_WIKI2_HTTP_ERROR_RESPONSE_CODE=([400]="Bad Request" [401]="Unauthorized" [404]="Not Found")
 typeset -Ar acp_SPACE_STATUS=([current]="&status=current" [archived]="&status=archived" [all]="")
 typeset -Ar acp_SPACE_TYPE=([global]="&type=global" [personal]="&type=personal" [all]="")
 typeset -Ar acp_SPACE_AVAILABLE_KEYS=([id]="id" [key]="key" [name]="name" [type]="type" [status]="status" [homepageId]="homepageId" [description]="description")
