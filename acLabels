@@ -84,8 +84,9 @@ if [[ ${1:l} == "count" || ${1:l} == "json" || ${1:l} == "csv" ]]; then
         fi
         acp_HTTP_PARSE "`eval ${curl_command}`"
       fi
-      if [ $acp_HTTP_RETURN_CODE -eq 404 ]; then
-        printf "404,Not Found\n"
+      # is response OK?
+      if [ ! -z ${(k)acp_WIKI2_HTTP_ERROR_RESPONSE_CODE[${acp_HTTP_RETURN_CODE}]} ]; then
+        printf "%u,%s\n" ${(k)acp_WIKI2_HTTP_ERROR_RESPONSE_CODE[${acp_HTTP_RETURN_CODE}]} ${(v)acp_WIKI2_HTTP_ERROR_RESPONSE_CODE[${acp_HTTP_RETURN_CODE}]}
         continue
       fi
       # work cursor
